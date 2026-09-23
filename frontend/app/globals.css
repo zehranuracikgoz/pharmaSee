@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #161b27;
+  --bg-card : #1c2333;
+  --border: #2d3748;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: #e2e8f0;
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius : 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+/* Card base */
+@layer components {
+  .card {
+    @apply bg-gray-800/60 border border-gray-700/60 rounded-xl backdrop-blur-sm;
+  }
+  .card-header {
+    @apply px-5 py-4 border-b border-gray-700/60 flex items-center gap-2;
+  }
+
+  .card-body {
+    @apply px-5 py-4;
+  }
+  .badge-ticker {
+    @apply font-mono font-bold text-indigo-300 text-sm;
+  }
+  .stat-label {
+    @apply text-xs text-gray-400 uppercase tracking-wide;
+  }
+  .stat-value {
+    @apply text-2xl font-bold text-white;
+  }
+
+}
