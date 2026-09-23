@@ -8,7 +8,7 @@ interface Props {
 export default function MomentumBadge({ momentum, size = "md" }: Props) {
   if (momentum == null) {
     return (
-      <span className={clsx("inline-flex items-center rounded-full bg-gray-700 text-gray-400 font-mono",
+      <span className={clsx("inline-flex items-center rounded-full bg-slate-100 text-slate-400 font-mono",
         size === "sm" && "px-2 py-0.5 text-xs",
         size === "md" && "px-3 py-1 text-sm",
         size === "lg" && "px-4 py-1.5 text-base",

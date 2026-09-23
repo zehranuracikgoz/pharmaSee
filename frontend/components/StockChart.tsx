@@ -23,9 +23,9 @@ interface Props {
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload?.length) {
     return(
-      <div className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
-        <p className="text-gray-400 text-xs mb-1">{label}</p>
-        <p className="text-white font-mono font-semibold">
+      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm shadow-sm">
+        <p className="text-slate-400 text-xs mb-1">{label}</p>
+        <p className="text-slate-900 font-mono font-semibold">
           ${Number(payload[0].value).toFixed(2)}
         </p>
       </div>
@@ -35,14 +35,14 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 export default function StockChart({
   data,
-  color = "#818cf8",
+  color = "#2563eb",
   approvalDates = [],
   height =280,
 }: Props) {
   if (!data.length) {
     return (
       <div
-        className="flex items-center justify-center text-gray-500 text-sm bg-gray-800/40 rounded-xl"
+        className="flex items-center justify-center text-slate-400 text-sm bg-slate-100 rounded-xl"
         style={{ height }}
       >
         Fiyat verisi bulunamadı
@@ -70,17 +70,17 @@ export default function StockChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis
           dataKey="label"
-          tick={{ fill: "#6b7280", fontSize: 11 }}
+          tick={{ fill: "#94a3b8", fontSize: 11 }}
           tickLine={false}
-          axisLine={{ stroke: "#374151" }}
+          axisLine={{ stroke: "#cbd5e1" }}
           interval="preserveStartEnd"
         />
         <YAxis
           domain={[minPrice - padding, maxPrice + padding]}
-          tick={{ fill: "#6b7280", fontSize: 11 }}
+          tick={{ fill: "#94a3b8", fontSize: 11 }}
           tickLine={false}
           axisLine={false}
           tickFormatter={(v) => `$${v.toFixed(0)}`}

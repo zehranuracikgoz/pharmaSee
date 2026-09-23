@@ -15,10 +15,10 @@ export default function Navbar() {
   const pathname = usePathname();
 
   return (
-    <nav className = "bg-brand-900 border-b border-brand-700 px-6 py-3 flex items-center gap-8">
-      <Link href="/" className="flex items-center gap-2 font-bold text-white text-lg tracking-tight">
-        <span className="text-brand-100">💊</span>
-        <span>Pharma<span className="text-indigo-300">See</span></span>
+    <nav className="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-8 shadow-sm">
+      <Link href="/" className="flex items-center gap-2 font-bold text-slate-900 text-lg tracking-tight">
+        <span className="text-brand-700">💊</span>
+        <span>Pharma<span className="text-accent-600">See</span></span>
       </Link>
 
       <div className="flex items-center gap-1 ml-4">
@@ -28,16 +28,16 @@ export default function Navbar() {
             href={l.href}
             className={clsx(
               "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-              pathname ===l.href
-                ? "bg-brand-600 text-white"
-                : "text-indigo-200 hover:bg-brand-700 hover:text-white"
+              pathname === l.href
+                ? "bg-brand-700 text-white"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
             )}
           >
             {l.label}
           </Link>
         ))}
       </div>
-      <div className="ml-auto text-xs text-indigo-400 font-mono">
+      <div className="ml-auto text-xs text-slate-400 font-mono">
         FDA × yfinance × ClinicalTrials
       </div>
     </nav>

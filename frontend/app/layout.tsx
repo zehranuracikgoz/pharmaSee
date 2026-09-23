@@ -14,9 +14,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="tr" className="dark">
+    <html lang="tr">
       <head />
-      <body className="min-h-screen bg-[#0f1117] text-gray-100">
+      <body className="min-h-screen bg-slate-50 text-slate-700 font-sans">
         <Navbar />
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">{children}</main>
       </body>
