@@ -94,7 +94,7 @@ export default function CompanyPage() {
 
   if (!profile) return null;
 
-  const { company, latest_price, approvals, momentum_scores } = profile;
+  const { company, latest_price, price_change_pct_1d, approvals, momentum_scores } = profile;
   const approvalDates = approvals
     .map((a) => a.approval_date)
     .filter(Boolean) as string[];
@@ -158,11 +158,17 @@ export default function CompanyPage() {
         <div className="card p-4">
           <div className="stat-label">Son Kapanış</div>
           <div className="stat-value text-xl">
-            {formatPrice(latest_price?.close)}
+            {formatPrice(latest_price)}
           </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {formatDate(latest_price?.price_date)}
-          </div>
+          {price_change_pct_1d != null && (
+            <div
+              className={`text-xs mt-1 font-mono ${
+                price_change_pct_1d >= 0 ? "text-emerald-600" : "text-rose-600"
+              }`}
+            >
+              {price_change_pct_1d >= 0 ? "▲" : "▼"} {Math.abs(price_change_pct_1d).toFixed(2)}% (1G)
+            </div>
+          )}
         </div>
         <div className = "card p-4">
           <div className="stat-label">Ortalama Momentum</div>

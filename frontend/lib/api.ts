@@ -56,7 +56,8 @@ export interface MomentumScore {
 
 export interface CompanyProfileOut {
   company: Company;
-  latest_price?: StockPricePoint;
+  latest_price?: number | null;
+  price_change_pct_1d?: number | null;
   approvals: DrugApproval[];
   momentum_scores: MomentumScore[];
 }
