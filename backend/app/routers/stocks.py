@@ -1,11 +1,30 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
-from app.schemas.schemas import CompanyOut, SearchOut, SearchResultItem, StockHistoryOut
+from app.schemas.schemas import (
+    CompanyOut,
+    SearchOut,
+    SearchResultItem,
+    StockHistoryOut,
+    TrackedCompanyOut,
+)
 from app.services.stock_service import get_company_info, get_stock_history, search_companies
 
 router = APIRouter(prefix="/stocks", tags=["Stocks"])
+companies_router = APIRouter(tags=["Stocks"])
+
+
+@companies_router.get(
+    "/companies", response_model=list[TrackedCompanyOut], summary="Takip edilen şirketler"
+)
+async def tracked_companies():
+    """Return config.TRACKED_TICKERS — the frontend's single source of tickers."""
+    return [
+        TrackedCompanyOut(ticker=ticker, name=name)
+        for ticker, name in settings.TRACKED_TICKERS.items()
+    ]
 
 
 @router.get("/search", response_model=SearchOut, summary="Şirket arama")
@@ -13,7 +32,7 @@ async def search(
     q: str= Query(..., min_length=1, description="Ticker veya şirket adı"),
     db: AsyncSession = Depends(get_db),
 ):
-    """ticker veya şirket adına göre DB'de arama yapar."""
+    """Search the DB by ticker or company name."""
     companies = await search_companies(q, db)
     results = [
         SearchResultItem(ticker=c.ticker, name=c.name, sector=c.sector)
@@ -27,7 +46,7 @@ async def company_info(
     ticker: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """şirket adı, sektör ve piyasa değerini döndürmek icin"""
+    """Return company name, sector and market cap."""
     ticker = ticker.upper()
     company =await get_company_info(ticker, db)
     if not company:
@@ -42,8 +61,8 @@ async def stock_history(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    yfinance üzerinden hisse kapanis fiyatlarını döndürür
-    onbellek 24 saat geçerlidir; yfinance kesintisinde DB den servis edilir
+    Return closing prices from yfinance.
+    Cached for 24 hours; served from the DB if yfinance is down.
     """
     ticker = ticker.upper()
     return await get_stock_history(ticker, db, period_days=period_days)

@@ -14,6 +14,11 @@ class CompanyOut(CompanyBase):
     model_config = {"from_attributes": True}
 
 
+class TrackedCompanyOut(BaseModel):
+    ticker: str
+    name: str
+
+
 # drug approval
 class DrugApprovalOut(BaseModel):
     id: str

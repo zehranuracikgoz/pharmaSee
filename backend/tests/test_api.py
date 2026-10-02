@@ -105,6 +105,76 @@ async def test_compare_endpoint_structure(client: AsyncClient):
     assert "history_b" in data
 
 
+# companies
+@pytest.mark.asyncio
+async def test_tracked_companies(client: AsyncClient):
+    resp = await client.get("/companies")
+    assert resp.status_code == 200
+    tickers = [c["ticker"] for c in resp.json()]
+    assert "ALNY" in tickers and "ARGX" in tickers
+    assert "SGEN" not in tickers and "BLUE" not in tickers
+
+
+# fda parsing / dedupe
+_FAKE_OPENFDA = [
+    {
+        "application_number": "BLA761339",
+        "openfda": {"brand_name": ["BRANDX"], "generic_name": ["genericx"]},
+        "submissions": [
+            {"submission_type": "ORIG", "submission_number": "1", "submission_status": "AP",
+             "submission_status_date": "20230115", "submission_class_code": "TYPE 1"},
+            {"submission_type": "SUPPL", "submission_number": "4", "submission_status": "AP",
+             "submission_status_date": "20240301", "submission_class_code": "EFFICACY"},
+            {"submission_type": "SUPPL", "submission_number": "5", "submission_status": "AP",
+             "submission_status_date": "20240601", "submission_class_code": "LABELING"},
+            {"submission_type": "SUPPL", "submission_number": "6", "submission_status": "AP",
+             "submission_status_date": "20240701", "submission_class_code": "MANUF (CMC)"},
+        ],
+    }
+]
+
+
+def test_parse_approvals_filters_noise_and_uses_stable_ids():
+    from app.services.fda_service import parse_approvals
+
+    rows = parse_approvals("TEST", _FAKE_OPENFDA)
+    assert sorted(r["id"] for r in rows) == ["BLA761339-ORIG-1", "BLA761339-SUPPL-4"]
+    assert all(r["application_type"] == "BLA" for r in rows)
+    # same input -> same ids
+    assert parse_approvals("TEST", _FAKE_OPENFDA) == rows
+
+
+@pytest.mark.asyncio
+async def test_upsert_approvals_is_idempotent(client: AsyncClient):
+    from sqlalchemy import func, select
+
+    from app.database import AsyncSessionLocal
+    from app.models.models import Company, DrugApproval
+    from app.services.cache_service import set_cached
+    from app.services.fda_service import (
+        _APPROVALS_CACHE_KEY,
+        parse_approvals,
+        upsert_approvals,
+    )
+
+    async with AsyncSessionLocal() as db:
+        if not await db.get(Company, "TESTX"):
+            db.add(Company(ticker="TESTX", name="Testx"))
+            await db.commit()
+        # seed the cache so no OpenFDA call is made
+        await set_cached(
+            db, _APPROVALS_CACHE_KEY, {"ticker": "TESTX"}, parse_approvals("TESTX", _FAKE_OPENFDA)
+        )
+
+        await upsert_approvals("TESTX", db)
+        await upsert_approvals("TESTX", db)
+
+        count = await db.scalar(
+            select(func.count()).select_from(DrugApproval).where(DrugApproval.company_id == "TESTX")
+        )
+        assert count == 2
+
+
 # cache
 @pytest.mark.asyncio
 async def test_cache_hit_faster_than_miss(client: AsyncClient):

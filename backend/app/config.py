@@ -16,6 +16,32 @@ class Settings(BaseSettings):
 
     ALPHA_VANTAGE_KEY: str=""  # fallback if yfinance is down
 
+    # tracked companies — single source of truth; the frontend reads it via GET /companies
+    # the name (first word) is also used for OpenFDA /ClinicalTrials searches
+    TRACKED_TICKERS: dict[str, str] = {
+        "MRNA": "Moderna",
+        "BNTX": "BioNTech",
+        "PFE": "Pfizer",
+        "REGN": "Regeneron",
+        "BIIB": "Biogen",
+        "GILD": "Gilead Sciences",
+        "AMGN": "Amgen",
+        "VRTX": "Vertex Pharmaceuticals",
+        "ALNY" : "Alnylam Pharmaceuticals",
+        "ARGX": "argenx",
+        "BEAM": "Beam Therapeutics",
+        "CRSP": "CRISPR Therapeutics",
+        "NTLA": "Intellia Therapeutics",
+    }
+
+    @property
+    def database_url_async(self) -> str:
+        # supabase / render hand out "postgresql://"; the async engine needs the asyncpg driver
+        url = self.DATABASE_URL
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+
     @field_validator("DEBUG", mode="before")
     @classmethod
     def strip_debug(cls, v):

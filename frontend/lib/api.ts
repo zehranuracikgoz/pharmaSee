@@ -54,6 +54,11 @@ export interface MomentumScore {
   interpretation?: string;
 }
 
+export interface TrackedCompany {
+  ticker: string;
+  name: string;
+}
+
 export interface CompanyProfileOut {
   company: Company;
   latest_price?: number | null;
@@ -95,6 +100,8 @@ export interface SearchOut {
 
 export const api = {
   health: () => apiFetch<{ status: string }>("/health"),
+
+  companies: () => apiFetch<TrackedCompany[]>("/companies"),
   fdaSync: () =>
     apiFetch<{ status: string; message: string }>("/fda/sync", {
       method: "POST",

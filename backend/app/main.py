@@ -32,9 +32,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#route
+# routes
 app.include_router(fda.router)
 app.include_router(stocks.router)
+app.include_router(stocks.companies_router)
 app.include_router(analysis.router)
 
 

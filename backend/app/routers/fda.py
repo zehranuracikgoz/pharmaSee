@@ -20,8 +20,8 @@ async def fda_calendar(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    önümüzdeki `days_ahead` gün içindeki FDA onay kararlarini listelemek icin
-    onbellek 24 saat
+    List FDA approval decisions within the next `days_ahead` days.
+    Cached for 24 hours.
     """
     return await get_fda_calendar(db, days_ahead=days_ahead)
 
@@ -32,8 +32,8 @@ async def company_approvals(
     db: AsyncSession =Depends(get_db),
 ):
     """
-    Belirli bir biyoteknoloji şirketinin FDA onay gecmisini listelemek icin.
-    ilk cagrida OpenFDA'dan ceker, sonraki çağrılarda onbellekten servis eder.
+    List the FDA approval history of a biotech company.
+    Fetched from OpenFDA on the first call, served from cache afterwards.
     """
     ticker = ticker.upper()
     await upsert_approvals(ticker, db)
@@ -50,7 +50,7 @@ async def clinical_trials(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    ClinicalTrials.gov dan şirketin aktif klinik araştırmalarını listelemek için
+    List the company's active clinical trials from ClinicalTrials.gov.
     """
     ticker = ticker.upper()
     return await fetch_clinical_trials(ticker, db)
@@ -59,8 +59,8 @@ async def clinical_trials(
 @router.post("/sync", summary="Şirket listesini senkronize et")
 async def sync(db: AsyncSession = Depends(get_db)):
     """
-    BIOTECH_TICKERS listesindeki tüm şirketleri veritabanına ekliyor
-    Geliştirme/demo icin.
+    Insert every company from TRACKED_TICKERS into the database.
+    For development/demo use.
     """
     await sync_companies(db)
     return {"status": "ok","message": "Şirketler senkronize edildi"}

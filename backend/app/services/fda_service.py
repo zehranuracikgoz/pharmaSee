@@ -1,51 +1,96 @@
 """
-OpenFDA API + ClinicalTrials.gov API entegrasyonu
+OpenFDA API + ClinicalTrials.gov API integration
 
 OpenFDA  → https://api.fda.gov/drug/drugsfda.json
 ClinTrials → https://clinicaltrials.gov/api/v2/studies
 """
-import uuid
+import logging
 from datetime import date, datetime, timedelta
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.models import Company, DrugApproval
 from app.schemas.schemas import FDACalendarItem, FDACalendarOut
 from app.services.cache_service import get_cached, set_cached
 
+logger = logging.getLogger(__name__)
+
 OPENFDA_BASE = "https://api.fda.gov/drug/drugsfda.json"
 CLINTRIALS_BASE = "https://clinicaltrials.gov/api/v2/studies"
 
-# biyoteknoloji / ilaç izleme listesi — genislyebilir
-BIOTECH_TICKERS = {
-    "MRNA": "Moderna",
-    "BNTX": "BioNTech",
-    "PFE": "Pfizer",
-    "REGN": "Regeneron",
-    "BIIB": "Biogen",
-    "GILD": "Gilead Sciences",
-    "AMGN": "Amgen",
-    "VRTX": "Vertex Pharmaceuticals",
-    "SGEN": "Seagen",
-    "BLUE": "bluebird bio",
-    "BEAM": "Beam Therapeutics",
-    "CRSP": "CRISPR Therapeutics",
-    "NTLA": "Intellia Therapeutics",
-}
+# v2: deterministic ids + EFFICACY filter; skip old (uuid, unfiltered) entries
+_APPROVALS_CACHE_KEY = "fda_approvals_v2"
 
 
 async def _fetch_json(url: str, params: dict, timeout: float = 15.0) -> dict:
+    """
+    Return the JSON of a successful response. OpenFDA reports "no matches" as a 404 —
+    that is a valid empty result, so {} is returned. Other HTTP / network errors are raised.
+    """
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.get(url, params=params)
+        if resp.status_code == 404:
+            return {}
         resp.raise_for_status()
         return resp.json()
 
 
+def _is_meaningful_submission(sub: dict) -> bool:
+    """Original approvals + new-indication (EFFICACY) supplements; drops labeling / CMC changes."""
+    sub_type = sub.get("submission_type") or ""
+    return sub_type == "ORIG" or (
+        sub_type.startswith("SUPPL") and sub.get("submission_class_code") == "EFFICACY"
+    )
+
+
+def parse_approvals(ticker: str, results: list[dict]) -> list[dict]:
+    """Convert OpenFDA drugsfda results into DrugApproval rows (deduplicated)."""
+    approvals: dict[str, dict] = {}
+    for r in results:
+        application_number = r.get("application_number", "")
+        openfda = r.get("openfda", {})
+        brand = (openfda.get("brand_name") or [""])[0]
+        generic = (openfda.get("generic_name") or [""])[0]
+        app_type = "".join(ch for ch in application_number if ch.isalpha())  # NDA / BLA / ANDA
+
+        for sub in r.get("submissions", []):
+            if not _is_meaningful_submission(sub):
+                continue
+
+            approval_date_str = sub.get("submission_status_date", "")
+            try:
+                approval_date = datetime.strptime(
+                    approval_date_str [:8], "%Y%m%d"
+                ).date() if approval_date_str else None
+            except ValueError:
+                approval_date = None
+
+            approval_id = (
+                f"{application_number}-{sub.get('submission_type')}-{sub.get('submission_number')}"
+            )
+            approvals[approval_id] = {
+                "id": approval_id,
+                "company_id": ticker,
+                "drug_name": generic or brand or "Bilinmiyor",
+                "brand_name": brand,
+                "approval_date": str(approval_date) if approval_date else None,
+                "application_type": app_type,
+                "status":"Approved"
+                if sub.get("submission_status") == "AP"
+                else sub.get("submission_status"),
+                "indication": None,
+            }
+    return list(approvals.values())
+
+
 async def sync_companies(db: AsyncSession) -> None:
-    """BIOTECH_TICKERS listesindeki şirketleri veritabanına kaydetmek (yoksa eklemek) icin"""
-    for ticker, name in BIOTECH_TICKERS.items():
+    """Insert companies from TRACKED_TICKERS into the DB if missing."""
+    for ticker, name in settings.TRACKED_TICKERS.items():
         existing =await db.get(Company, ticker)
         if not existing:
             db.add(Company(ticker=ticker, name=name, sector="Biotechnology"))
@@ -55,14 +100,14 @@ async def fetch_fda_approvals_for_company(
     ticker:str, company_name: str, db: AsyncSession
 ) -> list[dict]:
     """
-    OpenFDA dan belirli şirket için onay kayıtlarını çek
-    önbellekte varsa döndür.
+    Fetch approval records for a company from OpenFDA;
+    return the cached copy if present.
     """
-    cache_key = "fda_approvals"
+    cache_key = _APPROVALS_CACHE_KEY
     params = {"ticker": ticker}
 
     cached =await get_cached(db, cache_key, params)
-    if cached:
+    if cached is not None:
         return cached
 
     search_term = company_name.split()[0].lower()
@@ -74,83 +119,61 @@ async def fetch_fda_approvals_for_company(
                 "limit": 50,
             },
         )
-        results =data.get("results", [])
-    except (httpx.HTTPError, Exception):
-        results = []
+    except (httpx.HTTPError, ValueError):
+        # failed requests aren't cached; the next call retries
+        logger.exception("OpenFDA request failed for %s", ticker)
+        return []
 
-    approvals = []
-    for r in results:
-        submissions = r.get("submissions", [])
-        for sub in submissions:
-            if sub.get("submission_type") in ("ORIG", "SUPPL"):
-                approval_date_str = sub.get("submission_status_date", "")
-                try:
-                    approval_date = datetime.strptime(
-                        approval_date_str [:8], "%Y%m%d"
-                    ).date() if approval_date_str else None
-                except ValueError:
-                    approval_date = None
-
-                brand = r.get("openfda", {}).get("brand_name", [""])[0]
-                generic = r.get("openfda", {}).get("generic_name", [""])[0]
-                app_type = r.get("application_number", "")[:3]  # NDA / BLA
-
-                approvals.append(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "company_id": ticker,
-                        "drug_name": generic or brand or "Bilinmiyor",
-                        "brand_name": brand,
-                        "approval_date": str(approval_date) if approval_date else None,
-                        "application_type": app_type,
-                        "status":"Approved"
-                        if sub.get("submission_status") == "AP"
-                        else sub.get("submission_status"),
-                        "indication": None,
-                    }
-                )
-
+    approvals = parse_approvals(ticker, data.get("results", []))
     await set_cached(db, cache_key, params, approvals)
     return approvals
 
+
+def _insert_ignore(db: AsyncSession):
+    """INSERT ... ON CONFLICT DO NOTHING for the current dialect (SQLite: same as INSERT OR IGNORE)."""
+    dialect = db.get_bind().dialect.name
+    insert_fn = pg_insert if dialect == "postgresql" else sqlite_insert
+    return insert_fn(DrugApproval).on_conflict_do_nothing(index_elements=["id"])
+
+
 async def upsert_approvals(ticker: str, db: AsyncSession) -> list[DrugApproval]:
-    """Şirket için API den çekilen onayları DB'ye yaz, listeyi döndür."""
+    """Write fetched approvals to the DB (skipping existing ones) and return the company's rows."""
     company = await db.get(Company, ticker)
     if not company:
         return []
 
     raw = await fetch_fda_approvals_for_company(ticker, company.name, db)
 
-    records = []
-    for a in raw:
-        existing = await db.get(DrugApproval, a["id"])
-        if not existing:
-            obj = DrugApproval(
-                id=a["id"],
-                company_id=ticker,
-                drug_name=a["drug_name"],
-                brand_name=a["brand_name"],
-                approval_date=date.fromisoformat(a["approval_date"])
+    if raw:
+        rows = [
+            {
+                "id": a["id"],
+                "company_id": ticker,
+                "drug_name": a["drug_name"],
+                "brand_name": a["brand_name"],
+                "approval_date": date.fromisoformat(a["approval_date"])
                 if a["approval_date"]
                 else None,
-                application_type=a["application_type"],
-                status=a["status"],
-            )
-            db.add(obj)
-            records.append(obj)
-        else:
-            records.append(existing)
+                "application_type": a["application_type"],
+                "status": a["status"],
+            }
+            for a in raw
+        ]
+        await db.execute(_insert_ignore(db), rows)
+        await db.commit()
 
-    await db.commit()
-    return records
+    result = await db.execute(
+        select(DrugApproval).where(DrugApproval.company_id == ticker)
+    )
+    return list(result.scalars().all())
 
 async def get_fda_calendar(
     db: AsyncSession,
     days_ahead: int = 90,
 ) -> FDACalendarOut:
     """
-    `days_ahead` gün içindeki FDA kararlarını döndür
-    önce DB'yi kontrol et; yoksa OpenFDA'yı çek.
+    Return FDA decisions within the next `days_ahead` days;
+    check the DB first, otherwise fetch from OpenFDA.
     """
     today = date.today()
     cutoff = today + timedelta(days=days_ahead)
@@ -163,15 +186,15 @@ async def get_fda_calendar(
     result = await db.execute(stmt)
     pending = result.scalars().all()
 
-    # DB de yeterli pending kayıt yoksa tüm şirketleri senkronize etmek icin
+    # not enough pending rows in the DB — sync companies
     if len(pending) < 3:
         await sync_companies(db)
-        for ticker in list(BIOTECH_TICKERS.keys())[:5]:
+        for ticker in list(settings.TRACKED_TICKERS.keys())[:5]:
             await upsert_approvals(ticker, db)
         result = await db.execute(stmt)
         pending = result.scalars().all()
 
-    # Şirket adlarını çek
+    # load company names
     company_map: dict[str, str] = {}
     company_result =await db.execute(select(Company))
     for c in company_result.scalars().all():
@@ -193,12 +216,12 @@ async def get_fda_calendar(
     return FDACalendarOut(items=items, total=len(items))
 
 async def fetch_clinical_trials(ticker: str, db: AsyncSession) -> list[dict]:
-    """ClinicalTrials.gov'dan şirket adına göre aktif trialları çek."""
+    """Fetch active trials from ClinicalTrials.gov by company name."""
     cache_key = "clinical_trials"
     params = {"ticker": ticker}
 
     cached =await get_cached(db, cache_key, params)
-    if cached:
+    if cached is not None:
         return cached
 
     company = await db.get(Company, ticker)
@@ -217,8 +240,10 @@ async def fetch_clinical_trials(ticker: str, db: AsyncSession) -> list[dict]:
             },
         )
         studies = data.get("studies", [])
-    except (httpx.HTTPError, Exception):
-        studies = []
+    except (httpx.HTTPError, ValueError):
+        # failed requests aren't cached; the next call retries
+        logger.exception("ClinicalTrials.gov request failed for %s", ticker)
+        return []
 
     trials = []
     for s in studies:

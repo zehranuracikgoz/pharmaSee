@@ -15,14 +15,16 @@ import {
 import { api, CompareOut } from "@/lib/api";
 import Link from "next/link";
 
-const BIOTECH_TICKERS = [
-  "MRNA", "BNTX", "PFE", "REGN", "BIIB",
-  "GILD", "AMGN", "VRTX", "SGEN", "BLUE",
-  "BEAM", "CRSP", "NTLA",
-];
-
 function CompareInner() {
   const params = useSearchParams();
+  const [tickers, setTickers] = useState<string[]>([]);
+
+  useEffect(() => {
+    api
+      .companies()
+      .then((list) => setTickers(list.map((c) => c.ticker)))
+      .catch(() => setTickers([]));
+  }, []);
 
   const [tickerA, setTickerA] = useState(params?.get("a") ?? "MRNA");
   const [tickerB, setTickerB] = useState(params?.get("b") ?? "BNTX");
@@ -48,6 +50,10 @@ function CompareInner() {
   useEffect(() => {
     load(tickerA, tickerB, period);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // keep the selected ticker in the dropdown even if it isn't in the list (e.g. from the URL)
+  const optionsFor = (selected: string, other: string) =>
+    Array.from(new Set([selected, ...tickers])).filter((t) => t && t !== other);
 
   // build merged chart data
   const chartData = (() => {
@@ -84,7 +90,7 @@ function CompareInner() {
               onChange={(e) => setTickerA(e.target.value)}
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
-              {BIOTECH_TICKERS.filter((t) => t !==tickerB).map((t) => (
+              {optionsFor(tickerA, tickerB).map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
@@ -99,7 +105,7 @@ function CompareInner() {
               onChange={(e) => setTickerB(e.target.value)}
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
-              {BIOTECH_TICKERS.filter((t) => t !== tickerA).map((t) => (
+              {optionsFor(tickerB, tickerA).map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>

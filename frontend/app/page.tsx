@@ -6,12 +6,6 @@ import { api, Company } from "@/lib/api";
 import SearchBar from "@/components/SearchBar";
 import { getWatchlist } from "@/lib/watchlist";
 
-const TICKERS = [
-  "MRNA", "BNTX", "PFE", "REGN", "BIIB",
-  "GILD", "AMGN", "VRTX", "SGEN", "BLUE",
-  "BEAM", "CRSP", "NTLA",
-];
-
 interface CompanyRow extends Company {
   loading: boolean;
 }
@@ -29,39 +23,39 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [listError, setListError] = useState("");
   useEffect(() => {
     setWatchlist(getWatchlist());
   }, []);
 
   useEffect(() => {
-    TICKERS.forEach((ticker) => {
-      setCompanies((prev) => {
-        if (prev.find((c) => c.ticker === ticker)) return prev;
-        return [
-          ...prev,
-          { ticker, name: "", loading: true },
-        ] as CompanyRow[];
-      });
+    api
+      .companies()
+      .then((tracked) => {
+        setCompanies(tracked.map((t) => ({ ...t, loading: true })));
 
-      api
-        .stockInfo(ticker)
-        .then((info) => {
-          setCompanies((prev) =>
-            prev.map((c) =>
-              c.ticker === ticker ? { ...info, loading: false } : c
-            )
-          );
-        })
-        .catch(() => {
-          setCompanies((prev) =>
-            prev.map((c) =>
-              c.ticker === ticker
-                ? { ticker, name: ticker, loading: false }
-                : c
-            )
-          );
+        tracked.forEach(({ ticker, name }) => {
+          api
+            .stockInfo(ticker)
+            .then((info) => {
+              setCompanies((prev) =>
+                prev.map((c) =>
+                  c.ticker === ticker ? { ...info, loading: false } : c
+                )
+              );
+            })
+            .catch(() => {
+              setCompanies((prev) =>
+                prev.map((c) =>
+                  c.ticker === ticker ? { ticker, name, loading: false } : c
+                )
+              );
+            });
         });
-    });
+      })
+      .catch((err) => {
+        setListError(err.message || "Şirket listesi alınamadı");
+      });
   }, []);
 
   const handleSync = async () => {
@@ -181,7 +175,13 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-700/40">
-                {companies.length === 0
+                {listError ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-red-500">
+                      {listError}
+                    </td>
+                  </tr>
+                ) : companies.length === 0
                   ? Array.from({ length: 8 }).map((_, i) => (
                       <tr key = {i} className="animate-pulse">
                         <td className="px-4 py-3">
