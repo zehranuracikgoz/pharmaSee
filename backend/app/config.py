@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./pharmasee.db"
 
     DEBUG: bool = False
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "https://*.vercel.app"]
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
 
     CACHE_TTL_SECONDS: int = 86400  # 24h
 
