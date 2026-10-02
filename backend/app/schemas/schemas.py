@@ -48,7 +48,7 @@ class StockHistoryOut(BaseModel):
     prices: list[StockPricePoint]
 
 
-# fda calender
+# fda calendar
 class FDACalendarItem(BaseModel):
     company_name: str
     ticker: str | None = None
@@ -84,7 +84,7 @@ class MomentumScoreOut(BaseModel):
     t_minus_30_price: float | None= None
     t_minus_1_price: float | None = None
     momentum_pct: float | None = None
-    interpretation: str | None = None  # "Piyasa onayı bekliyordu" / "Sürpriz onay" vb
+    interpretation: str | None = None  # human-readable label, e.g. "Sürpriz onay" (surprise approval)
 
 
 # company profile

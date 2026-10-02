@@ -35,7 +35,7 @@ async def impact_analysis(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    seçili şirketin tüm FDA onay olayları için +-window_days günlük hisse fiyatı etkisini hesaplar
+    Compute the +-window_days stock price impact of every FDA approval for the company.
     """
     ticker = ticker.upper()
     await upsert_approvals(ticker, db)
@@ -60,13 +60,13 @@ async def momentum_score(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Formül: momentum_pct = (fiyat[T-1] − fiyat[T-30]) / fiyat[T-30] * 100
+    Formula: momentum_pct = (price[T-1] − price[T-30]) / price[T-30] * 100
 
-    yüksek pozitif değer -> piyasa onayı bekliyordu.
-    Negatif değer -> piyasa temkinliydi; onay sürpriz olabilir.
+    High positive value -> the market expected approval.
+    Negative value -> the market was cautious; the approval may have been a surprise.
     """
     ticker = ticker.upper()
-    # once fiyat verisinin DB de olduğundan emin ol
+    # make sure price data is in the DB first
     await get_stock_history(ticker, db, period_days=730)
     return await get_momentum_score(ticker, event_date, db)
 
@@ -81,7 +81,7 @@ async def all_momentum_scores(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    ticker ın tüm onaylanmis FDA olayları için momentum skoru döndürür
+    Return momentum scores for all approved FDA events of the ticker.
     """
     ticker = ticker.upper()
     await upsert_approvals(ticker, db)
@@ -89,7 +89,7 @@ async def all_momentum_scores(
     return await get_all_momentum_scores(ticker, db)
 
 
-# company profil
+# company profile
 @router.get(
     "/profile/{ticker}",
     response_model=CompanyProfileOut,
@@ -100,8 +100,8 @@ async def company_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    tek endpoint te şirket bilgisi, son hisse fiyatı, FDA onayları ve
-    momentum skorlarını bir arada döndürür. şirket profil sayfası için
+    Company info, latest price, FDA approvals and momentum scores
+    in a single call. Used by the company profile page.
     """
     ticker = ticker.upper()
 
@@ -151,8 +151,8 @@ async def compare(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    iki biyoteknoloji şirketinin hisse geçmişini ve FDA onaylarini
-    tek endpoint ten döndürür. /compare sayfası için
+    Price history and FDA approvals of two biotech companies
+    in a single call. Used by the /compare page.
     """
     ticker_a = a.upper()
     ticker_b = b.upper()

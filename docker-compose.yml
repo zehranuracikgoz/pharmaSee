@@ -11,7 +11,7 @@ services:
     env_file:
       - ./backend/.env
     volumes:
-      # SQLite dosyasını container disinda tutmak icin
+      # keep the SQLite file outside the container
       - pharmasee_db:/app/pharmasee.db
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
