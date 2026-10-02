@@ -1,9 +1,9 @@
 """
-pandas tabanlı analiz servisi
+pandas-based analysis service
 
-İki ana hesaplama:
-  1.Impact Analysis - FDA onayının +-30 günlük hisse etkisi
-  2.Momentum Score - Onay öncesi 30 günlük piyasa beklenti endeksi
+Two main calculations:
+  1. Impact Analysis - stock impact in the +-30 days around an FDA approval
+  2. Momentum Score - market expectation index over the 30 days before approval
 """
 from datetime import date, timedelta
 
@@ -21,11 +21,11 @@ from app.services.cache_service import get_cached, set_cached
 from app.services.stock_service import get_stock_history
 
 
-#yardımcılar
+# helpers
 async def _price_series(ticker: str, db: AsyncSession) -> pd.Series:
     """
-    ticker'ın tüm tarihsel kapanış fiyatlarını pandas series olarak döndür
-    index: date, Values: close.
+    Return all historical closes for a ticker as a pandas Series.
+    index: date, values: close.
     """
     stmt = (
         select(StockPrice.price_date, StockPrice.close)
@@ -35,9 +35,9 @@ async def _price_series(ticker: str, db: AsyncSession) -> pd.Series:
     result = await db.execute(stmt)
     rows = result.all()
     if not rows:
-        # DB de veri yoksa yfinance dan çek
+        # no rows in the DB yet — fetch from yfinance
         hist = await get_stock_history(ticker, db, period_days=730)
-        rows = [(p.date, p.close) for p in hist.prices]
+        rows = [(p.price_date, p.close) for p in hist.prices]
 
     if not rows:
         return pd.Series(dtype=float)
@@ -49,7 +49,7 @@ async def _price_series(ticker: str, db: AsyncSession) -> pd.Series:
 def _avg_price_in_window(
     series:pd.Series, center: date, days_before: bool, window: int
 ) -> float | None:
-    """center tarihine göre önceki/sonraki 'window' günlük ortalama kapanış."""
+    """Average close over the 'window' days before/after the center date."""
     center_ts = pd.Timestamp(center)
     if days_before:
         mask = (series.index < center_ts) & (
@@ -70,16 +70,17 @@ async def get_impact_analysis(
     window_days: int = 30,
 ) -> list[ImpactAnalysisOut]:
     """
-    ticker için tüm FDA onay olaylarının +-window_days günlük hisse etkisini hesaplamak icin
+    Compute the +-window_days stock impact of every FDA approval for a ticker.
     """
-    cache_key = "impact_analysis"
+    # v2: StockPricePoint.date -> price_date; old entries can't be parsed
+    cache_key = "impact_analysis_v2"
     params = {"ticker": ticker, "window": window_days}
 
     cached =await get_cached(db, cache_key, params)
-    if cached:
+    if cached is not None:
         return [ImpactAnalysisOut(**item) for item in cached]
 
-    # onay kayıtlarını cekmek icin
+    # load approval records
     stmt = select(DrugApproval).where(
         DrugApproval.company_id == ticker,
         DrugApproval.approval_date.isnot(None),
@@ -114,11 +115,11 @@ async def get_impact_analysis(
         )
 
         pre_prices = [
-            StockPricePoint(date=ts.date(), close=round(v, 4))
+            StockPricePoint(price_date=ts.date(), close=round(v, 4))
             for ts, v in series[pre_mask].items()
         ]
         post_prices = [
-            StockPricePoint(date=ts.date(), close=round(v, 4))
+            StockPricePoint(price_date=ts.date(), close=round(v, 4))
             for ts, v in series[post_mask].items()
         ]
 
@@ -136,7 +137,7 @@ async def get_impact_analysis(
             )
         )
 
-    # onbellege yaz
+    # write to cache
     await set_cached(
         db, cache_key, params, [o.model_dump() for o in outputs]
     )
@@ -145,7 +146,7 @@ async def get_impact_analysis(
 
 #momentum score
 def _interpret_momentum(momentum_pct: float) -> str:
-    """momentum yüzdesine göre yorum üret."""
+    """Turn a momentum percentage into a label."""
     if momentum_pct >= 15:
         return "Piyasa onayı güçlü bekliyordu (yüksek momentum)"
     elif momentum_pct >= 5:
@@ -164,14 +165,14 @@ async def get_momentum_score(
     db: AsyncSession,
 ) -> MomentumScoreOut:
     """
-    formül: momentum_pct = (fiyat[T-1] - fiyat[T-30]) / fiyat[T-30] × 100
-    T = FDA onay/karar tarihi
+    formula: momentum_pct = (price[T-1] - price[T-30]) / price[T-30] × 100
+    T = FDA approval/decision date
     """
     cache_key = "momentum_score"
     params = {"ticker": ticker, "event_date": str(event_date)}
 
     cached = await get_cached(db, cache_key, params)
-    if cached:
+    if cached is not None:
         return MomentumScoreOut(**cached)
 
     series = await _price_series(ticker, db)
@@ -183,14 +184,14 @@ async def get_momentum_score(
     if not series.empty:
         event_ts = pd.Timestamp(event_date)
 
-        # t-30: event tarihinden 30+ gün önceki en yakın kapanış
+        # t-30: latest close at least ~30 days before the event
         window_30 = series[
             series.index <= event_ts - pd.Timedelta(days=28)
         ]
         if not window_30.empty:
             t_minus_30_price = round(float(window_30.iloc[-1]), 4)
 
-        # t-1: event tarihinden 1+ gün önceki en yakın kapanış
+        # t-1: latest close before the event date
         window_1 = series[series.index < event_ts]
         if not window_1.empty:
             t_minus_1_price = round(float(window_1.iloc[-1]), 4)
@@ -216,7 +217,7 @@ async def get_momentum_score(
 async def get_all_momentum_scores(
     ticker: str, db: AsyncSession
 ) -> list[MomentumScoreOut]:
-    """ticker ın tüm onaylanmış FDA olayları için momentum skoru hesaplamak icin"""
+    """Compute momentum scores for all approved FDA events of a ticker."""
     stmt= select(DrugApproval).where(
         DrugApproval.company_id == ticker,
         DrugApproval.approval_date.isnot(None),

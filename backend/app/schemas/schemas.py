@@ -30,7 +30,7 @@ class DrugApprovalOut(BaseModel):
 
 #stockprice
 class StockPricePoint(BaseModel):
-    date: date
+    price_date: date
     open: float | None = None
     close: float
     high: float | None = None
