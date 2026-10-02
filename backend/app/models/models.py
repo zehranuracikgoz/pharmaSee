@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import String, Float, Integer, Date, DateTime, Text, ForeignKey, func
+from sqlalchemy import BigInteger, String, Float, Integer, Date, DateTime, Text, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -12,7 +12,7 @@ class Company(Base):
     sector: Mapped[str | None]= mapped_column(String(100), nullable=True)
     market_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
     approvals: Mapped[list["DrugApproval"]]= relationship(back_populates="company")
     stock_prices: Mapped[list["StockPrice"]] = relationship(back_populates="company")
@@ -31,7 +31,7 @@ class DrugApproval(Base):
     application_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # NDA/BLA/sNDA
     status: Mapped[str | None] = mapped_column(String(30), nullable=True)  # Approved / Rejected / Pending
     indication: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
     company: Mapped["Company"] = relationship(back_populates="approvals")
 
@@ -45,7 +45,7 @@ class StockPrice(Base):
     close: Mapped[float] = mapped_column(Float)
     high: Mapped[float | None] = mapped_column(Float, nullable=True)
     low: Mapped[float |None]= mapped_column(Float, nullable=True)
-    volume: Mapped[int | None] = mapped_column(Integer,nullable=True)
+    volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     company: Mapped["Company"] = relationship(back_populates="stock_prices")
 
@@ -57,5 +57,5 @@ class CacheEntry(Base):
     endpoint: Mapped[str] = mapped_column(String(200))
     params_hash: Mapped[str] = mapped_column(String(64))
     data_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    expires_at: Mapped[datetime]= mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+    expires_at: Mapped[datetime]= mapped_column(DateTime(timezone=True))

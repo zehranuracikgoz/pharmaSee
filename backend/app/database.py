@@ -3,7 +3,7 @@ from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    settings.database_url_async,
     echo=settings.DEBUG,
     connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
 )
@@ -28,6 +28,6 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    from app.models import models  # noqa: F401 — modelleri import etmek icin Base.metadata bilsin
+    from app.models import models  # noqa: F401 — import models so Base.metadata knows the tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

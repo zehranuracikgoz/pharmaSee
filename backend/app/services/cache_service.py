@@ -1,16 +1,21 @@
 """
-SQLite tabanlı önbellekleme katmani
-her endpoint +parametre kombinasyonu için 24 saatlik TTL uygulanır
+Database-backed cache layer
+each endpoint + params combination gets a 24h TTL
 """
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select,delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.models import CacheEntry
+
+
+def _utcnow() -> datetime:
+    # tz-aware for timestamptz columns; asyncpg treats naive values as local time
+    return datetime.now(timezone.utc)
 
 
 def _make_hash(endpoint: str, params: dict) -> str:
@@ -20,12 +25,12 @@ def _make_hash(endpoint: str, params: dict) -> str:
 async def get_cached(
     db: AsyncSession, endpoint: str, params: dict
 ) -> dict | list | None:
-    """Geçerli bir önbellek kaydı varsa döndür; yoksa None."""
+    """return a valid cache entry if present, else None."""
     h = _make_hash(endpoint, params)
     stmt = select(CacheEntry).where(
         CacheEntry.endpoint == endpoint,
         CacheEntry.params_hash == h,
-        CacheEntry.expires_at > datetime.utcnow(),
+        CacheEntry.expires_at > _utcnow(),
     )
     result = await db.execute(stmt)
     entry= result.scalar_one_or_none()
@@ -41,11 +46,11 @@ async def set_cached(
     data: dict | list,
     ttl_seconds: int | None = None,
 ) -> None:
-    """Veriyi önbelleğe yaz; aynı anahtar için eski kayıt varsa sil"""
+    """Write data to the cache, replacing any old entry for the same key."""
     h = _make_hash(endpoint, params)
     ttl = ttl_seconds or settings.CACHE_TTL_SECONDS
 
-    # eski kaydı temizle
+    # remove the old entry
     await db.execute(
         delete(CacheEntry).where(
             CacheEntry.endpoint == endpoint,
@@ -57,16 +62,16 @@ async def set_cached(
         endpoint=endpoint,
         params_hash=h,
         data_json=json.dumps(data, default=str),
-        expires_at=datetime.utcnow() + timedelta(seconds=ttl),
+        expires_at=_utcnow() + timedelta(seconds=ttl),
     )
     db.add(entry)
     await db.commit()
 
 
 async def purge_expired(db: AsyncSession) -> int:
-    """Süresi dolmuş tümm önbellek kayıtlarını sil. Scheduler tarafından çağrılır"""
+    """Delete all expired cache entries. Meant to be called by a scheduler."""
     result = await db.execute(
-        delete(CacheEntry).where(CacheEntry.expires_at<= datetime.utcnow())
+        delete(CacheEntry).where(CacheEntry.expires_at<= _utcnow())
     )
     await db.commit()
     return result.rowcount
