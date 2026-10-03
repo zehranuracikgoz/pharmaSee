@@ -3,10 +3,16 @@ import "./globals.css";
 import Navbar from "@/components/Navbar";
 import ServerWakeBanner from "@/components/ServerWakeBanner";
 
+const title = "PharmaSee";
+const description = "FDA approvals and biotech stock analytics";
+
 export const metadata: Metadata = {
-  title: "PharmaSee — Pharma & Biotech Intelligence",
-  description:
-    "Track FDA drug approvals and biotech stock performance.",
+  // social previews need absolute image urls
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://pharma-see.vercel.app"),
+  title,
+  description,
+  openGraph: { title, description, type: "website", siteName: title },
+  twitter: { card: "summary_large_image", title, description },
 };
 
 export default function RootLayout({

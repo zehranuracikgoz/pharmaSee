@@ -241,7 +241,7 @@ function CompareInner() {
                   <div>
                     <div className="stat-label">Sector</div>
                     <div className="text-text mt-0.5">
-                      {company?.sector || "Biotechnology"}
+                      {company?.sector || "—"}
                     </div>
                   </div>
                   <div>

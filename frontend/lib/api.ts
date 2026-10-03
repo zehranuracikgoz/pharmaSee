@@ -74,6 +74,20 @@ export interface TrackedCompany {
   name: string;
 }
 
+export interface ClinicalTrial {
+  nct_id: string;
+  title: string;
+  phase: string; // first phase only, e.g. "PHASE2"
+  phases?: string[]; // all phases, e.g. ["PHASE1", "PHASE2"]
+  status: string;
+  conditions: string[];
+}
+
+export interface Quote {
+  price: number | null;
+  changePct: number | null; // vs the previous close
+}
+
 export interface CompanyProfileOut {
   company: Company;
   latest_price?: number | null;
@@ -137,6 +151,21 @@ export const api = {
     apiFetch<StockHistoryOut>(
       `/stocks/${ticker}/history?period_days=${periodDays}`
     ),
+
+  // stockInfo has no price; last close and 1-day change come from a week of history
+  quote: async (ticker: string): Promise<Quote> => {
+    const h = await apiFetch<StockHistoryOut>(`/stocks/${ticker}/history?period_days=7`);
+    const closes = h.prices.map((p) => p.close).filter((c): c is number => c != null);
+    const last = closes.at(-1) ?? null;
+    const prev = closes.at(-2) ?? null;
+    return {
+      price: last,
+      changePct: last != null && prev ? ((last - prev) / prev) * 100 : null,
+    };
+  },
+
+  clinicalTrials: (ticker: string) =>
+    apiFetch<ClinicalTrial[]>(`/fda/${ticker}/trials`),
 
   searchCompanies: (q: string) =>
     apiFetch<SearchOut>(`/stocks/search?q=${encodeURIComponent(q)}`),

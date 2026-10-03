@@ -141,7 +141,7 @@ export default function CompanyPage() {
             )}
           </div>
           <p className="text-sm text-muted mt-0.5">
-            {company.sector || "Biotechnology"} · Market Cap:{" "}
+            {company.sector && `${company.sector} · `}Market Cap:{" "}
             {formatBig(company.market_cap)}
           </p>
         </div>

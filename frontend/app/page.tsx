@@ -9,6 +9,12 @@ import { getWatchlist } from "@/lib/watchlist";
 
 interface CompanyRow extends Company {
   loading: boolean;
+  changePct?: number | null; // 1-day % change
+  quoteLoading: boolean;
+}
+
+function formatChange(c: number) {
+  return `${c >= 0 ? "+" : ""}${c.toFixed(2)}%`;
 }
 
 function formatMarketCap(v?: number) {
@@ -23,19 +29,20 @@ function csvCell(value: string | number | undefined | null): string {
   if (value ==null) return "";
   let s = String(value);
   // keep spreadsheet apps from evaluating text as a formula
-  if (typeof value === "string" && /^[=+\-@]/.test(s)) s = `'${s}`;
+  // real numbers (e.g. "-1.14") are written as-is
+  if (/^[=+\-@]/.test(s) && !/^[+-]?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function downloadCompaniesCsv(rows: Company[]) {
+function downloadCompaniesCsv(rows: CompanyRow[]) {
   const lines = [
-    "ticker,name,sector,market_cap",
+    "ticker,name,sector,market_cap,change_1d_pct",
     ...rows.map((c) =>
-      [c.ticker, c.name, c.sector, c.market_cap].map(csvCell).join(",")
+      [c.ticker, c.name, c.sector, c.market_cap, c.changePct?.toFixed(2)].map(csvCell).join(",")
     ),
   ];
   // bom so excel opens the file as UTF-8
-  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a=document.createElement("a");
   a.href = url;
@@ -90,13 +97,26 @@ export default function DashboardPage() {
             prev.map((c) => (c.ticker === ticker ? { ...c, loading: false } : c))
           )
         );
+
+      api
+        .quote(ticker)
+        .then(({ changePct }) =>
+          setCompanies((prev) =>
+            prev.map((c) => (c.ticker === ticker ? { ...c, changePct, quoteLoading: false } : c))
+          )
+        )
+        .catch(() =>
+          setCompanies((prev) =>
+            prev.map((c) => (c.ticker === ticker ? { ...c, quoteLoading: false } : c))
+          )
+        );
     });
   };
 
   const loadCompanies = () =>
     api.companies().then((list) => {
       setListError("");
-      setCompanies(list.map((c) => ({ ...c, loading: true })));
+      setCompanies(list.map((c) => ({ ...c, loading: true, quoteLoading: true })));
       enrich(list.map((c) => c.ticker));
     });
 
@@ -243,6 +263,9 @@ export default function DashboardPage() {
                   <th className="text-right px-4 py-3 text-muted font-medium">
                     Market Cap
                   </th>
+                  <th className="text-right px-4 py-3 text-muted font-medium">
+                    1D
+                  </th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
@@ -262,13 +285,16 @@ export default function DashboardPage() {
                       <td className="px-4 py-3 text-right">
                         <div className="h-4 bg-border rounded w-20 ml-auto" />
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="h-4 bg-border rounded w-12 ml-auto" />
+                      </td>
                       <td className="px-4 py-3" />
                     </tr>
                   ))
                 ) : companies.length === 0 ? (
                   <tr>
                     <td
-                      colSpan ={5}
+                      colSpan={6}
                       className={`px-4 py-8 text-center ${listError ? "text-danger" : "text-muted"}`}
                     >
                       {listError || "No companies found. Click Sync FDA to populate."}
@@ -290,7 +316,7 @@ export default function DashboardPage() {
                         {c.loading ? (
                           <div className="h-4 bg-border rounded w-24 animate-pulse" />
                         ) : (
-                          c.sector || "Biotechnology"
+                          c.sector || "—"
                         )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-text">
@@ -298,6 +324,17 @@ export default function DashboardPage() {
                           <div className="h-4 bg-border rounded w-16 ml-auto animate-pulse" />
                         ) : (
                           formatMarketCap(c.market_cap)
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-xs">
+                        {c.quoteLoading ? (
+                          <div className="h-4 bg-border rounded w-12 ml-auto animate-pulse" />
+                        ) : c.changePct == null ? (
+                          <span className="text-muted">—</span>
+                        ) : (
+                          <span className={c.changePct >= 0 ? "text-success" : "text-danger"}>
+                            {formatChange(c.changePct)}
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">

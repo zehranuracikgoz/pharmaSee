@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import {
-  Activity,
   ArrowLeftRight,
   CalendarDays,
   FlaskConical,
@@ -13,6 +12,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import DataFreshness from "@/components/DataFreshness";
+import PulseLogo from "@/components/PulseLogo";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -29,7 +29,7 @@ export default function Navbar() {
   return (
     <nav className="bg-surface border-b border-border px-4 sm:px-6 py-3 flex items-center gap-4 lg:gap-8 shadow-sm">
       <Link href="/" className="flex items-center gap-2 font-bold text-text text-lg tracking-tight shrink-0">
-        <Activity className="h-5 w-5 text-accent" />
+        <PulseLogo className="text-accent" size={22} />
         <span>Pharma<span className="text-accent">See</span></span>
       </Link>
 

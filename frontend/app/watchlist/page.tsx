@@ -50,21 +50,9 @@ export default function WatchlistPage() {
         .then((info) => update(ticker, { company: info, loading: false }))
         .catch(() => update(ticker, { loading: false }));
 
-      // stockInfo has no price; last close and 1-day change come from recent history
       api
-        .stockHistory(ticker, 7)
-        .then((h) => {
-          const closes = h.prices
-            .map((p) => p.close)
-            .filter((c): c is number => c != null);
-          const last = closes.at(-1) ?? null;
-          const prev = closes.at(-2) ?? null;
-          update(ticker, {
-            price: last,
-            changePct: last != null && prev ? ((last - prev) / prev) * 100 : null,
-            priceLoading: false,
-          });
-        })
+        .quote(ticker)
+        .then((q) => update(ticker, { ...q, priceLoading: false }))
         .catch(() => update(ticker, { priceLoading: false }));
     });
   }, []);
@@ -152,7 +140,7 @@ export default function WatchlistPage() {
                       {item.loading ? (
                         <div className ="h-4 bg-border rounded w-24 animate-pulse" />
                       ) : (
-                        item.company?.sector || "Biotechnology"
+                        item.company?.sector || "—"
                       )}
                     </td>
                     <td className="px-5 py-4 text-right font-mono text-text">
