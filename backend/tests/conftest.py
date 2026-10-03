@@ -14,6 +14,7 @@ _TEST_DB = Path(tempfile.mkdtemp(prefix="pharmasee-tests-")) / "test.db"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB.as_posix()}"
 
 from datetime import date, timedelta  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 from urllib.parse import urlparse  # noqa: E402
 
 import httpx  # noqa: E402
@@ -23,6 +24,9 @@ import pytest  # noqa: E402
 import yfinance  # noqa: E402
 
 from app.config import settings  # noqa: E402
+
+# differs from the .info marketCap so tests can tell which source was used
+FAST_INFO_MARKET_CAP = 42_000_000_000
 
 
 # ── yfinance
@@ -73,6 +77,12 @@ class FakeTicker:
         self.ticker=ticker.upper()
         self._known = self.ticker in settings.TRACKED_TICKERS
         self.info = _fake_info(self.ticker) if self._known else {"trailingPegRatio": None}
+        # unknown symbols give None here too, like real yfinance
+        self.fast_info = SimpleNamespace(
+            market_cap=FAST_INFO_MARKET_CAP if self._known else None,
+            last_price=101.25 if self._known else None,
+            previous_close=100.0 if self._known else None,
+        )
 
     def get_info(self) -> dict:
         return dict(self.info)

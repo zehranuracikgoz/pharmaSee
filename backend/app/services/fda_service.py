@@ -17,6 +17,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.models import Company, DrugApproval
 from app.schemas.schemas import FDACalendarItem, FDACalendarOut
+from app.services.stock_service import refresh_market_caps
 from app.services.cache_service import (
     get_cached,
     invalidate_cached,
@@ -28,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 OPENFDA_BASE = "https://api.fda.gov/drug/drugsfda.json"
 CLINTRIALS_BASE = "https://clinicaltrials.gov/api/v2/studies"
+# one page only; companies with more active trials show as "100+" in the UI
+TRIALS_PAGE_SIZE = 100
 
 # v3: ids include the ticker; cached v2 lists hold ticker-less ids and must not be reused
 _APPROVALS_CACHE_KEY = "fda_approvals_v3"
@@ -102,7 +105,8 @@ async def sync_companies(db: AsyncSession) -> None:
     for ticker, name in settings.TRACKED_TICKERS.items():
         existing =await db.get(Company, ticker)
         if not existing:
-            db.add(Company(ticker=ticker, name=name, sector="Biotechnology"))
+            # sector stays null until yfinance provides a real one
+            db.add(Company(ticker=ticker, name=name))
     await db.commit()
 
 async def fetch_fda_approvals_for_company(
@@ -177,7 +181,7 @@ async def upsert_approvals(ticker: str, db: AsyncSession) -> list[DrugApproval]:
     return list(result.scalars().all())
 
 async def run_scheduled_sync() -> None:
-    """daily sync: fad data + fresh approval fetch for every ticker"""
+    """daily sync: company list, fresh approvals and market caps for every ticker"""
     async with AsyncSessionLocal() as db:
         await sync_companies(db)
         refreshed = 0
@@ -188,10 +192,13 @@ async def run_scheduled_sync() -> None:
                 refreshed+= 1
             except Exception:
                 logger.exception("Scheduled FDA sync failed for %s", ticker)
+        caps_updated, caps_no_data, caps_failed = await refresh_market_caps(db)
         purged=await purge_expired(db)
     logger.info(
-        "scheduled fda sync done: %d/%d tickers refreshed, %d expired cache entries purged",
-        refreshed, len(settings.TRACKED_TICKERS), purged,
+        "scheduled sync done: approvals %d/%d refreshed | market caps %d updated, "
+        "%d no data, %d failed | %d expired cache entries purged",
+        refreshed, len(settings.TRACKED_TICKERS),
+        caps_updated, caps_no_data, caps_failed, purged,
     )
 
 
@@ -245,7 +252,8 @@ async def get_fda_calendar(
 
 async def fetch_clinical_trials(ticker: str, db: AsyncSession) -> list[dict]:
     """Fetch active trials from ClinicalTrials.gov by company name."""
-    cache_key = "clinical_trials"
+    # v2: up to TRIALS_PAGE_SIZE trials and a full "phases" list per trial
+    cache_key = "clinical_trials_v2"
     params = {"ticker": ticker}
 
     cached =await get_cached(db, cache_key, params)
@@ -263,7 +271,7 @@ async def fetch_clinical_trials(ticker: str, db: AsyncSession) -> list[dict]:
             {
                 "query.spons" : sponsor,
                 "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING",
-                "pageSize": 20,
+                "pageSize": TRIALS_PAGE_SIZE,
                 "format": "json",
             },
         )
@@ -289,6 +297,7 @@ async def fetch_clinical_trials(ticker: str, db: AsyncSession) -> list[dict]:
                 "nct_id" : id_info.get("nctId", ""),
                 "title": id_info.get("briefTitle", ""),
                 "phase": phase,
+                "phases": phase_list,  # e.g. ["PHASE1", "PHASE2"] for a combined trial
                 "status": status_info.get("overallStatus", ""),
                 "conditions": conditions.get("conditions", []),
             }

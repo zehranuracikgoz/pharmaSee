@@ -5,6 +5,7 @@ rate-limit errors are retried up to 3 attempts (waiting 2s, then 4s).
 """
 import asyncio
 import logging
+import math
 from datetime import date, timedelta
 
 import yfinance as yf
@@ -13,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from yfinance.exceptions import YFRateLimitError
 
+from app.config import settings
 from app.models.models import Company, StockPrice
 from app.schemas.schemas import StockPricePoint, StockHistoryOut
 from app.services.cache_service import get_cached, set_cached
@@ -191,6 +193,62 @@ async def get_company_info(ticker: str, db: AsyncSession) -> Company | None:
     if company and company.market_cap:
         return company
 
+    info=await _fetch_info(ticker)
+    info_ok = _has_company_data(info)
+    market_cap = await _market_cap_from(ticker, info)
+
+    # nothing usable: store nothing, so the next request tries again
+    if not info_ok and not market_cap:
+        return company
+
+    if info_ok:
+        name = info.get("longName") or info.get("shortName")
+        sector = info.get("sector")  # null if missing, never a guess
+        description= info.get("longBusinessSummary")
+    else:
+        # fast_info has no name/sector/description: keep what we already have
+        name = company.name if company else ticker
+        sector = company.sector if company else None
+        description = company.description if company else None
+
+    if company:
+        company.name = name
+        company.sector = sector
+        company.market_cap = market_cap
+        company.description = description
+    else:
+        company = Company(
+            ticker=ticker,
+            name=name,
+            sector=sector,
+            market_cap=market_cap,
+            description=description,
+        )
+        db.add(company)
+    await db.commit()
+    await db.refresh(company)
+    return company
+
+
+def _has_company_data(info: dict | None) -> bool:
+    #unknown tickers, and .info blocked from cloud ips, give a near-empty dict
+    return bool(info) and bool(info.get("longName") or info.get("shortName"))
+
+
+async def _market_cap_from(ticker: str, info: dict | None) -> float | None:
+    """market cap from .info, falling back to fast_info"""
+    if not _has_company_data(info):
+        logger.warning("yfinance .info returned no company data for %s", ticker)
+    market_cap =info.get("marketCap") if _has_company_data(info) else None
+    if not market_cap:
+        logger.warning("no marketCap in .info for %s, trying fast_info", ticker)
+        market_cap = await _fast_info_market_cap(ticker)
+    return market_cap
+
+
+async def _fetch_info(ticker: str) -> dict | None:
+    """yf .info with retries on rate limits; None on failure"""
+
     def _blocking_fetch() -> dict:
         return yf.Ticker(ticker).get_info()
 
@@ -216,35 +274,49 @@ async def get_company_info(ticker: str, db: AsyncSession) -> Company | None:
         except Exception:
             logger.exception("yfinance info failed for %s", ticker)
             break
+    return info
 
-    # for unknown tickers yfinance may return a near-empty dict — don't store a fake company
-    if not info or not (info.get("longName") or info.get("shortName")):
-        if info is not None:
-            logger.warning("yfinance returned no company info for %s", ticker)
-        return company
 
-    name= info.get("longName") or info.get("shortName")
-    sector = info.get("sector")
-    market_cap = info.get("marketCap")
-    description = info.get("longBusinessSummary")
+async def _fast_info_market_cap(ticker: str) -> float | None:
+    """market cap from yf fast_info (chart + shares data, works when .info is blocked)"""
 
-    if company:
-        company.name = name
-        company.sector = sector
-        company.market_cap = market_cap
-        company.description = description
-    else:
-        company = Company(
-            ticker=ticker,
-            name=name,
-            sector=sector,
-            market_cap=market_cap,
-            description=description,
-        )
-        db.add(company)
-    await db.commit()
-    await db.refresh(company)
-    return company
+    def _blocking_fetch() -> float | None:
+        value = yf.Ticker(ticker).fast_info.market_cap
+        return float(value) if value else None
+
+    try:
+        value = await _run_with_timeout(asyncio.to_thread(_blocking_fetch))
+    except asyncio.TimeoutError:
+        logger.error("yfinance fast_info timed out for %s after %ss", ticker, _YFINANCE_TIMEOUT)
+        return None
+    except Exception:
+        logger.exception("yfinance fast_info failed for %s", ticker)
+        return None
+    # unknown tickers give None; nan/negative would be bad data
+    return value if value is not None and math.isfinite(value) and value > 0 else None
+
+
+async def refresh_market_caps(db: AsyncSession) -> tuple[int, int, int]:
+    """
+    daily job: re-fetch market cap (.info, then fast_info) for every tracked ticker.
+    a row changes only if a value came back. returns (updated, no_data, failed).
+    """
+    updated = no_data = failed = 0
+    for ticker in settings.TRACKED_TICKERS:
+        try:
+            market_cap = await _market_cap_from(ticker, await _fetch_info(ticker))
+            company = await db.get(Company, ticker)
+            if market_cap and company:
+                company.market_cap = market_cap
+                await db.commit()
+                updated += 1
+            else:
+                no_data += 1  # keep the stored value
+        except Exception:
+            failed += 1
+            logger.exception("market cap refresh failed for %s", ticker)
+            await db.rollback()  # keep the session usable for the next ticker
+    return updated, no_data, failed
 
 
 async def search_companies(query: str, db: AsyncSession) -> list[Company]:

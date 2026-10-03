@@ -57,6 +57,71 @@ async def test_stock_info_unknown_ticker(client: AsyncClient):
     assert resp.status_code == 404
 
 
+async def _reset_company(ticker: str):
+    from app.database import AsyncSessionLocal
+    from app.models.models import Company
+
+    async with AsyncSessionLocal() as db:
+        company = await db.get(Company, ticker)
+        company.market_cap = None
+        company.sector = None
+        await db.commit()
+
+
+def _blocked_info_ticker(fast_market_cap):
+    """yfinance.Ticker whose .info is blocked (near-empty dict, as from cloud ips)"""
+    from types import SimpleNamespace
+
+    from tests.conftest import FakeTicker
+
+    class BlockedInfoTicker(FakeTicker):
+        def __init__(self, ticker, *args, **kwargs):
+            super().__init__(ticker, *args, **kwargs)
+            self.info = {"trailingPegRatio": None}
+            self.fast_info =  SimpleNamespace(market_cap=fast_market_cap)
+
+    return BlockedInfoTicker
+
+
+@pytest.mark.asyncio
+async def test_stock_info_falls_back_to_fast_info(client: AsyncClient, monkeypatch):
+    import yfinance
+
+    from tests.conftest import FAST_INFO_MARKET_CAP
+
+    await client.post("/fda/sync")
+    await _reset_company("VRTX")
+    monkeypatch.setattr(yfinance, "Ticker", _blocked_info_ticker(FAST_INFO_MARKET_CAP))
+
+    resp = await client.get("/stocks/VRTX/info")
+    assert resp.status_code== 200
+    data = resp.json()
+    assert data["market_cap"] == FAST_INFO_MARKET_CAP
+    assert data["sector"] is None  # never filled with a guess
+
+
+@pytest.mark.asyncio
+async def test_failed_stock_info_is_not_stored(client: AsyncClient, monkeypatch):
+    import yfinance
+
+    from tests.conftest import FakeTicker
+
+    await client.post("/fda/sync")
+    await _reset_company("GILD")
+
+    #.info blocked and fast_info empty: nothing usable, nothing stored
+    monkeypatch.setattr(yfinance, "Ticker", _blocked_info_ticker(None))
+    resp = await client.get("/stocks/GILD/info")
+    assert resp.status_code == 200
+    assert resp.json()["market_cap"] is None
+
+    # the next request tries yfinance again and gets the real data
+    monkeypatch.setattr(yfinance, "Ticker", FakeTicker)
+    data  = (await client.get("/stocks/GILD/info")).json()
+    assert data["market_cap"] == 50_000_000_000
+    assert data["sector"] == "Healthcare"
+
+
 @pytest.mark.asyncio
 async def test_stock_history_returns_valid_structure(client: AsyncClient):
     # prices can be empty in sandbox, just check the shape
@@ -247,6 +312,51 @@ async def test_scheduled_sync_refreshes_all_tickers(client: AsyncClient):
             select(func.count()).select_from(DrugApproval).where(DrugApproval.company_id == "PFE")
         )
         assert count==2
+
+
+@pytest.mark.asyncio
+async def test_market_cap_refresh_isolates_failures(client: AsyncClient, monkeypatch):
+    import yfinance
+    from sqlalchemy import select
+
+    from app.config import settings
+    from app.database import AsyncSessionLocal
+    from app.models.models import Company
+    from app.services.stock_service import refresh_market_caps
+    from tests.conftest import FakeTicker
+
+    class BrokenFastInfo:
+        @property
+        def market_cap(self):
+            raise RuntimeError("yahoo down")
+
+    class PfeFailsTicker(FakeTicker):
+        # yfinance fails completely for PFE (.info and fast_info), works for the rest
+        def __init__(self, ticker, *args, **kwargs):
+            super().__init__(ticker, *args, **kwargs)
+            if self.ticker == "PFE":
+                self.fast_info = BrokenFastInfo()
+
+        def get_info(self):
+            if self.ticker == "PFE":
+                raise RuntimeError("yahoo down")
+            return super().get_info()
+
+    await client.post("/fda/sync")
+    async with AsyncSessionLocal() as db:
+        for company in await db.scalars(select(Company)):
+            company.market_cap = 1.0  # stale value
+        await db.commit()
+
+    monkeypatch.setattr(yfinance, "Ticker", PfeFailsTicker)
+    async with AsyncSessionLocal() as db:
+        updated, no_data, failed = await refresh_market_caps(db)
+
+    assert (updated, no_data, failed) == (len(settings.TRACKED_TICKERS) - 1, 1, 0)
+    async with AsyncSessionLocal() as db:
+        caps = {c.ticker: c.market_cap for c in await db.scalars(select(Company))}
+    assert caps["PFE"] == 1.0  # nothing came back: stored value kept
+    assert all(caps[t] == 50_000_000_000 for t in settings.TRACKED_TICKERS if t != "PFE")
 
 
 # cache
