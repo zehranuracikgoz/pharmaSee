@@ -8,7 +8,7 @@ interface Props {
 export default function MomentumBadge({ momentum, size = "md" }: Props) {
   if (momentum == null) {
     return (
-      <span className={clsx("inline-flex items-center rounded-full bg-slate-100 text-slate-400 font-mono",
+      <span className={clsx("inline-flex items-center rounded-full bg-surface2 text-muted font-mono",
         size === "sm" && "px-2 py-0.5 text-xs",
         size === "md" && "px-3 py-1 text-sm",
         size === "lg" && "px-4 py-1.5 text-base",
@@ -28,10 +28,10 @@ export default function MomentumBadge({ momentum, size = "md" }: Props) {
         size === "sm" && "px-2 py-0.5 text-xs",
         size === "md" && "px-3 py-1 text-sm",
         size === "lg" && "px-4 py-1.5 text-base",
-        isPositive && isStrong && "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/40",
-        isPositive && !isStrong && "bg-emerald-500/10 text-emerald-500",
-        !isPositive && isStrong && "bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/40",
-        !isPositive && !isStrong && "bg-rose-500/10 text-rose-500",
+        isPositive && isStrong && "bg-success/20 text-success ring-1 ring-success/40",
+        isPositive && !isStrong && "bg-success/10 text-success",
+        !isPositive && isStrong && "bg-danger/20 text-danger ring-1 ring-danger/40",
+        !isPositive && !isStrong && "bg-danger/10 text-danger",
       )}
     >
       {isPositive ? "▲" : "▼"} {Math.abs(momentum).toFixed(2)}%
