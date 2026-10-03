@@ -16,7 +16,7 @@ import PulseLogo from "@/components/PulseLogo";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/calendar", label: "FDA Calendar", icon: CalendarDays },
+  { href: "/calendar", label: "Catalysts", icon: CalendarDays },
   { href: "/impact", label: "Impact", icon: TrendingUp },
   { href: "/clinicaltrials", label: "Clinical Trials", icon: FlaskConical },
   { href: "/compare", label: "Compare", icon: ArrowLeftRight },

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeftRight, CalendarDays, Check, Download, RefreshCw, Star } from "lucide-react";
+import { ArrowLeftRight, CalendarDays, Download, Star } from "lucide-react";
 import { api, Company } from "@/lib/api";
 import SearchBar from "@/components/SearchBar";
 import { getWatchlist } from "@/lib/watchlist";
@@ -58,8 +58,6 @@ export default function DashboardPage() {
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
   const [initialLoad, setInitialLoad] = useState(true);
   const [listError, setListError] = useState("");
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
 
   // Load watchlist
@@ -130,21 +128,6 @@ export default function DashboardPage() {
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSync = async () => {
-    setSyncing(true);
-    setSyncMsg(null);
-    try {
-      await api.fdaSync();
-      setSyncMsg({ ok: true, text: "Companies synced" });
-      // refresh the list after sync
-      await loadCompanies();
-    } catch {
-      setSyncMsg({ ok: false, text: "Sync failed" });
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const watchlistCompanies = companies.filter((c) =>
     watchlist.includes(c.ticker)
   );
@@ -158,31 +141,8 @@ export default function DashboardPage() {
             Overview of biotech stocks and FDA approval data
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <SearchBar inputRef={searchRef} />
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="inline-flex items-center gap-2 whitespace-nowrap shrink-0 bg-accent hover:bg-accent-hover disabled:opacity-50 text-bg text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-          >
-            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing…" : "Sync FDA"}
-          </button>
-        </div>
+        <SearchBar inputRef={searchRef} />
       </div>
-
-      {syncMsg && (
-        <div
-          className={`flex items-center gap-2 text-sm rounded-lg px-4 py-2 border ${
-            syncMsg.ok
-              ? "text-success bg-success/10 border-success/20"
-              : "text-danger bg-danger/10 border-danger/20"
-          }`}
-        >
-          {syncMsg.ok && <Check className="h-4 w-4" />}
-          {syncMsg.text}
-        </div>
-      )}
 
       {watchlistCompanies.length > 0 && (
         <section>
@@ -297,7 +257,7 @@ export default function DashboardPage() {
                       colSpan={6}
                       className={`px-4 py-8 text-center ${listError ? "text-danger" : "text-muted"}`}
                     >
-                      {listError || "No companies found. Click Sync FDA to populate."}
+                      {listError || "No companies found."}
                     </td>
                   </tr>
                 ) : (
@@ -362,10 +322,10 @@ export default function DashboardPage() {
         >
           <CalendarDays className="h-6 w-6 text-accent mb-3" />
           <div className="font-semibold text-text group-hover:text-accent-hover transition-colors">
-            FDA Calendar
+            Catalyst Calendar
           </div>
           <div className="text-xs text-muted mt-1">
-            Upcoming FDA approval decisions
+            Upcoming FDA decisions and trial readouts
           </div>
         </Link>
         <Link

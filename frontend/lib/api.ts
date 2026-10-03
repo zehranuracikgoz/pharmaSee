@@ -83,9 +83,43 @@ export interface ClinicalTrial {
   conditions: string[];
 }
 
+export type CatalystEventType =
+  | "pdufa"
+  | "adcom"
+  |  "approval"
+  | "crl"
+  | "regulatory_submission"
+  | "topline_readout"
+  | "trial_start"
+  | "other";
+
+export type DatePrecision = "day" | "month" | "quarter" | "half" | "year" | "none";
+
+export interface Catalyst {
+  id: number;
+  ticker: string;
+  event_type: CatalystEventType;
+  drug: string | null;
+  indication: string | null;
+  date_text:string | null;
+  event_date: string | null; //first day of the period, YYYY-MM-DD
+  date_precision: DatePrecision;
+  summary: string;
+  source_quote: string;
+  filing_url: string;
+  accession_number: string;
+}
+
+export interface CatalystQuery {
+  upcoming?: boolean;
+  pastDays?: number;
+  ticker?: string;
+  eventType?: string;
+}
+
 export interface Quote {
   price: number | null;
-  changePct: number | null; // vs the previous close
+  changePct: number |  null; //vs the previous close
 }
 
 export interface CompanyProfileOut {
@@ -106,20 +140,6 @@ export interface CompareOut {
   approvals_b: DrugApproval[];
 }
 
-export interface FDACalendarItem {
-  ticker: string;
-  company_name: string;
-  drug_name: string;
-  approval_date?: string;
-  application_type?: string;
-  status?: string;
-}
-
-export interface FDACalendarOut {
-  days_ahead: number;
-  items: FDACalendarItem[];
-}
-
 export interface SearchOut {
   query: string;
   results: Company[];
@@ -131,13 +151,6 @@ export const api = {
   health: () => apiFetch<{ status: string }>("/health"),
 
   companies: () => apiFetch<TrackedCompany[]>("/companies"),
-  fdaSync: () =>
-    apiFetch<{ status: string; message: string }>("/fda/sync", {
-      method: "POST",
-    }),
-
-  fdaCalendar: (daysAhead = 90) =>
-    apiFetch<FDACalendarOut>(`/fda/calendar?days_ahead=${daysAhead}`),
 
   fdaApprovals: (ticker: string) =>
     apiFetch<{ ticker: string; approvals: DrugApproval[] }>(
@@ -162,6 +175,16 @@ export const api = {
       price: last,
       changePct: last != null && prev ? ((last - prev) / prev) * 100 : null,
     };
+  },
+
+  catalysts: ({ upcoming, pastDays, ticker, eventType }: CatalystQuery = {}) => {
+    const params = new URLSearchParams();
+    if (upcoming) params.set("upcoming", "true");
+    if (pastDays) params.set("past_days", String(pastDays));
+    if (ticker) params.set("ticker", ticker);
+    if (eventType) params.set("event_type", eventType);
+    const qs = params.toString();
+    return apiFetch<Catalyst[]>(`/catalysts${qs ? `?${qs}` : ""}`);
   },
 
   clinicalTrials: (ticker: string) =>
