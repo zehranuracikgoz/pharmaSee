@@ -14,17 +14,23 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import AsyncSessionLocal
 from app.models.models import Company, DrugApproval
 from app.schemas.schemas import FDACalendarItem, FDACalendarOut
-from app.services.cache_service import get_cached, set_cached
+from app.services.cache_service import (
+    get_cached,
+    invalidate_cached,
+    purge_expired,
+    set_cached,
+)
 
 logger = logging.getLogger(__name__)
 
 OPENFDA_BASE = "https://api.fda.gov/drug/drugsfda.json"
 CLINTRIALS_BASE = "https://clinicaltrials.gov/api/v2/studies"
 
-# v2: deterministic ids + EFFICACY filter; skip old (uuid, unfiltered) entries
-_APPROVALS_CACHE_KEY = "fda_approvals_v2"
+# v3: ids include the ticker; cached v2 lists hold ticker-less ids and must not be reused
+_APPROVALS_CACHE_KEY = "fda_approvals_v3"
 
 
 async def _fetch_json(url: str, params: dict, timeout: float = 15.0) -> dict:
@@ -70,8 +76,11 @@ def parse_approvals(ticker: str, results: list[dict]) -> list[dict]:
             except ValueError:
                 approval_date = None
 
+            # ticker first: co-marketed drugs (pfizer/biontech) share an
+            # application, and each company needs its own row
             approval_id = (
-                f"{application_number}-{sub.get('submission_type')}-{sub.get('submission_number')}"
+                f"{ticker}-{application_number}-"
+                f"{sub.get('submission_type')}-{sub.get('submission_number')}"
             )
             approvals[approval_id] = {
                 "id": approval_id,
@@ -166,6 +175,25 @@ async def upsert_approvals(ticker: str, db: AsyncSession) -> list[DrugApproval]:
         select(DrugApproval).where(DrugApproval.company_id == ticker)
     )
     return list(result.scalars().all())
+
+async def run_scheduled_sync() -> None:
+    """daily sync: fad data + fresh approval fetch for every ticker"""
+    async with AsyncSessionLocal() as db:
+        await sync_companies(db)
+        refreshed = 0
+        for ticker in settings.TRACKED_TICKERS:
+            try:
+                await invalidate_cached(db, _APPROVALS_CACHE_KEY, {"ticker": ticker})
+                await upsert_approvals(ticker, db)
+                refreshed+= 1
+            except Exception:
+                logger.exception("Scheduled FDA sync failed for %s", ticker)
+        purged=await purge_expired(db)
+    logger.info(
+        "scheduled fda sync done: %d/%d tickers refreshed, %d expired cache entries purged",
+        refreshed, len(settings.TRACKED_TICKERS), purged,
+    )
+
 
 async def get_fda_calendar(
     db: AsyncSession,

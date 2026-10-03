@@ -2,9 +2,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
-import os
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_pharmasee.db")
-
+# db and external APIs are set up offline in conftest.py
 from app.main import app
 from app.database import init_db
 
@@ -138,7 +136,7 @@ def test_parse_approvals_filters_noise_and_uses_stable_ids():
     from app.services.fda_service import parse_approvals
 
     rows = parse_approvals("TEST", _FAKE_OPENFDA)
-    assert sorted(r["id"] for r in rows) == ["BLA761339-ORIG-1", "BLA761339-SUPPL-4"]
+    assert sorted(r["id"] for r in rows) == ["TEST-BLA761339-ORIG-1", "TEST-BLA761339-SUPPL-4"]
     assert all(r["application_type"] == "BLA" for r in rows)
     # same input -> same ids
     assert parse_approvals("TEST", _FAKE_OPENFDA) == rows
@@ -173,6 +171,82 @@ async def test_upsert_approvals_is_idempotent(client: AsyncClient):
             select(func.count()).select_from(DrugApproval).where(DrugApproval.company_id == "TESTX")
         )
         assert count == 2
+
+
+@pytest.mark.asyncio
+async def test_co_marketed_application_kept_for_each_company(client: AsyncClient):
+    # same drug application for two companies (pfizer/biontech) -> one row each
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models.models import Company, DrugApproval
+    from app.services.cache_service import set_cached
+    from app.services.fda_service import (
+        _APPROVALS_CACHE_KEY,
+        parse_approvals,
+        upsert_approvals,
+    )
+
+    async with AsyncSessionLocal() as db:
+        for ticker in ("COMA", "COMB"):
+            if not await db.get(Company, ticker):
+                db.add(Company(ticker=ticker, name=ticker))
+            await db.commit ()
+            await set_cached(
+                db, _APPROVALS_CACHE_KEY, {"ticker": ticker}, parse_approvals(ticker, _FAKE_OPENFDA)
+            )
+            
+            await upsert_approvals(ticker, db)
+
+        rows = (
+            await db.execute(
+                select(DrugApproval.company_id).where(DrugApproval.company_id.in_(["COMA", "COMB"]))
+            )
+        ).scalars().all()
+        assert sorted(rows) == ["COMA", "COMA", "COMB", "COMB"]
+
+
+# mocked data flows through the app (not just the response shape)
+@pytest.mark.asyncio
+async def test_stock_history_returns_mocked_prices(client: AsyncClient):
+    await client.post("/fda/sync")
+    resp = await client.get("/stocks/PFE/history?period_days=30")
+    assert resp.status_code == 200
+    prices = resp.json()["prices"]
+    assert len(prices) >= 15
+    assert {"price_date", "close"} <= prices[0].keys()
+
+
+@pytest.mark.asyncio
+async def test_fda_approvals_from_mocked_openfda(client: AsyncClient):
+    await client.post("/fda/sync")
+    resp = await client.get("/fda/REGN/approvals")
+    assert resp.status_code == 200
+    approvals = resp.json()
+    # orig + efficacy supplement kept, labeling supplement filtered out
+    assert all(a["id"].startswith("REGN-") for a in approvals)
+    assert sorted("-".join(a["id"].split("-")[-2:]) for a in approvals) == ["ORIG-1", "SUPPL-4"]
+    assert {a["drug_name"] for a in approvals} =={"testumab"}
+
+
+@pytest.mark.asyncio
+async def test_scheduled_sync_refreshes_all_tickers(client: AsyncClient):
+    from sqlalchemy import func, select
+
+    from app.config import settings
+    from app.database import AsyncSessionLocal
+    from app.models.models import DrugApproval
+    from app.services.fda_service import run_scheduled_sync
+
+    await run_scheduled_sync()
+
+    async with AsyncSessionLocal() as db:
+        tickers = await db.scalars(select(DrugApproval.company_id).distinct())
+        assert set(tickers) >= set(settings.TRACKED_TICKERS)
+        count = await db.scalar(
+            select(func.count()).select_from(DrugApproval).where(DrugApproval.company_id == "PFE")
+        )
+        assert count==2
 
 
 # cache

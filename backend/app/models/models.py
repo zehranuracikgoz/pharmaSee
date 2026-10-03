@@ -21,8 +21,8 @@ class Company(Base):
 class DrugApproval(Base):
     __tablename__ = "drug_approvals"
 
-    # deterministic key: "{application_number}-{submission_type}-{submission_number}"
-    # as the primary key it is already enforced as unique by the database
+    # deterministic key: "{ticker}-{application_number}-{submission_type}-{submission_number}"
+    # (ticker included so co-marketed drugs get one row per company); unique as the primary key
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     company_id: Mapped[str] = mapped_column(String(10), ForeignKey("companies.ticker"))
     drug_name: Mapped[str] = mapped_column(String(200))

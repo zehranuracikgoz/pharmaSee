@@ -17,7 +17,7 @@ companies_router = APIRouter(tags=["Stocks"])
 
 
 @companies_router.get(
-    "/companies", response_model=list[TrackedCompanyOut], summary="Takip edilen şirketler"
+    "/companies", response_model=list[TrackedCompanyOut], summary="Tracked companies"
 )
 async def tracked_companies():
     """Return config.TRACKED_TICKERS — the frontend's single source of tickers."""
@@ -27,9 +27,9 @@ async def tracked_companies():
     ]
 
 
-@router.get("/search", response_model=SearchOut, summary="Şirket arama")
+@router.get("/search", response_model=SearchOut, summary="Company search")
 async def search(
-    q: str= Query(..., min_length=1, description="Ticker veya şirket adı"),
+    q: str= Query(..., min_length=1, description="Ticker or company name"),
     db: AsyncSession = Depends(get_db),
 ):
     """Search the DB by ticker or company name."""
@@ -41,7 +41,7 @@ async def search(
     return SearchOut(results=results, query=q, total=len(results))
 
 
-@router.get("/{ticker}/info", response_model=CompanyOut, summary="Şirket bilgisi")
+@router.get("/{ticker}/info", response_model=CompanyOut, summary="Company info")
 async def company_info(
     ticker: str,
     db: AsyncSession = Depends(get_db),
@@ -50,14 +50,14 @@ async def company_info(
     ticker = ticker.upper()
     company =await get_company_info(ticker, db)
     if not company:
-        raise HTTPException(status_code=404, detail=f"{ticker} bulunamadı")
+        raise HTTPException(status_code=404, detail=f"{ticker} not found")
     return company
 
 
-@router.get("/{ticker}/history", response_model=StockHistoryOut, summary="Hisse fiyat geçmişi")
+@router.get("/{ticker}/history", response_model=StockHistoryOut, summary="Stock price history")
 async def stock_history(
     ticker: str,
-    period_days:int = Query(default=365, ge=7, le=730, description="Kaç günlük geçmiş"),
+    period_days:int = Query(default=365, ge=7, le=730, description="Days of history"),
     db: AsyncSession = Depends(get_db),
 ):
     """

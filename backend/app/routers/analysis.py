@@ -27,11 +27,11 @@ router = APIRouter(prefix="/analysis", tags=["Analysis"])
 @router.get(
     "/impact/{ticker}",
     response_model=list[ImpactAnalysisOut],
-    summary="FDA onay etkisi analizi",
+    summary="FDA approval impact analysis",
 )
 async def impact_analysis(
     ticker: str,
-    window_days: int = Query(default=30, ge=7, le=90, description="Analiz penceresi (gün)"),
+    window_days: int = Query(default=30, ge=7, le=90, description="Analysis window (days)"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -43,7 +43,7 @@ async def impact_analysis(
     if not results:
         raise HTTPException(
             status_code=404,
-            detail=f"{ticker} için yeterli onay/fiyat verisi bulunamadı",
+            detail=f"Insufficient approval or price data for {ticker}",
         )
     return results
 
@@ -52,11 +52,11 @@ async def impact_analysis(
 @router.get(
     "/momentum",
     response_model=MomentumScoreOut,
-    summary="Momentum Skoru — FDA öncesi piyasa beklentisi",
+    summary="Momentum score — market expectation before an FDA decision",
 )
 async def momentum_score(
-    ticker: str = Query(..., description="Şirket ticker sembolü (örn. MRNA)"),
-    event_date: date = Query(..., description="FDA karar tarihi (YYYY-MM-DD)"),
+    ticker: str = Query(..., description="Company ticker symbol (e.g. MRNA)"),
+    event_date: date = Query(..., description="FDA decision date (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -74,7 +74,7 @@ async def momentum_score(
 @router.get(
     "/momentum/{ticker}/all",
     response_model=list[MomentumScoreOut],
-    summary="Şirketin tüm FDA olayları için momentum skorları",
+    summary="Momentum scores for all FDA events of a company",
 )
 async def all_momentum_scores(
     ticker: str,
@@ -93,7 +93,7 @@ async def all_momentum_scores(
 @router.get(
     "/profile/{ticker}",
     response_model=CompanyProfileOut,
-    summary="Şirket profili — hisse + onaylar + momentum",
+    summary="Company profile — stock + approvals + momentum",
 )
 async def company_profile(
     ticker: str,
@@ -107,7 +107,7 @@ async def company_profile(
 
     company = await get_company_info(ticker, db)
     if not company:
-        raise HTTPException(status_code=404, detail=f"{ticker} bulunamadı")
+        raise HTTPException(status_code=404, detail=f"{ticker} not found")
 
     history = await get_stock_history(ticker, db, period_days=365)
     await upsert_approvals(ticker , db)
@@ -142,11 +142,11 @@ async def company_profile(
 @router.get(
     "/compare",
     response_model=CompareOut,
-    summary="İki şirketi karşılaştır",
+    summary="Compare two companies",
 )
 async def compare(
-    a: str = Query(..., description="Birinci ticker (örn. MRNA)"),
-    b: str = Query(..., description="İkinci ticker (örn. BNTX)"),
+    a: str = Query(..., description="First ticker (e.g. MRNA)"),
+    b: str = Query(..., description="Second ticker (e.g. BNTX)"),
     period_days: int = Query(default=365, ge=30, le=730),
     db: AsyncSession = Depends(get_db),
 ):

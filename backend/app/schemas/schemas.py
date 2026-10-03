@@ -84,7 +84,7 @@ class MomentumScoreOut(BaseModel):
     t_minus_30_price: float | None= None
     t_minus_1_price: float | None = None
     momentum_pct: float | None = None
-    interpretation: str | None = None  # human-readable label, e.g. "Sürpriz onay" (surprise approval)
+    interpretation: str | None = None  # human-readable label, e.g. "Market moderately anticipated approval"
 
 
 # company profile

@@ -14,9 +14,9 @@ from sqlalchemy import select
 
 router = APIRouter(prefix="/fda", tags=["FDA"])
 
-@router.get("/calendar", response_model=FDACalendarOut, summary="Yaklaşan FDA kararları takvimi")
+@router.get("/calendar", response_model=FDACalendarOut, summary="Upcoming FDA decisions calendar")
 async def fda_calendar(
-    days_ahead: int = Query(default=90, ge=1, le=365, description="Kaç gün ilerisi"),
+    days_ahead: int = Query(default=90, ge=1, le=365, description="Number of days ahead"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -26,7 +26,7 @@ async def fda_calendar(
     return await get_fda_calendar(db, days_ahead=days_ahead)
 
 
-@router.get("/{ticker}/approvals", response_model=list[DrugApprovalOut], summary="Şirket FDA onayları")
+@router.get("/{ticker}/approvals", response_model=list[DrugApprovalOut], summary="Company FDA approvals")
 async def company_approvals(
     ticker: str,
     db: AsyncSession =Depends(get_db),
@@ -44,7 +44,7 @@ async def company_approvals(
     return result.scalars().all()
 
 
-@router.get("/{ticker}/trials", summary="Aktif klinik araştırmalar")
+@router.get("/{ticker}/trials", summary="Active clinical trials")
 async def clinical_trials(
     ticker: str,
     db: AsyncSession = Depends(get_db),
@@ -56,11 +56,11 @@ async def clinical_trials(
     return await fetch_clinical_trials(ticker, db)
 
 
-@router.post("/sync", summary="Şirket listesini senkronize et")
+@router.post("/sync", summary="Sync the company list")
 async def sync(db: AsyncSession = Depends(get_db)):
     """
     Insert every company from TRACKED_TICKERS into the database.
     For development/demo use.
     """
     await sync_companies(db)
-    return {"status": "ok","message": "Şirketler senkronize edildi"}
+    return {"status": "ok","message": "Companies synced"}

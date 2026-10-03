@@ -148,15 +148,15 @@ async def get_impact_analysis(
 def _interpret_momentum(momentum_pct: float) -> str:
     """Turn a momentum percentage into a label."""
     if momentum_pct >= 15:
-        return "Piyasa onayı güçlü bekliyordu (yüksek momentum)"
+        return "Market strongly anticipated approval (high momentum)"
     elif momentum_pct >= 5:
-        return "Piyasa onayı ılımlı bekliyordu"
+        return "Market moderately anticipated approval"
     elif momentum_pct >= -5:
-        return "Nötr; piyasa beklentisi belirsizdi"
+        return "Neutral; market expectation was uncertain"
     elif momentum_pct >= -15:
-        return "Piyasa temkinliydi; olası ret beklentisi"
+        return "Market was cautious; possible rejection expected"
     else:
-        return "Sürpriz onay — piyasa ret bekliyordu (düşük momentum)"
+        return "Surprise approval — market expected rejection (low momentum)"
 
 
 async def get_momentum_score(
@@ -168,7 +168,8 @@ async def get_momentum_score(
     formula: momentum_pct = (price[T-1] - price[T-30]) / price[T-30] × 100
     T = FDA approval/decision date
     """
-    cache_key = "momentum_score"
+    # v3: current interpretation wording; older cached entries hold previous (incl. Turkish) text
+    cache_key = "momentum_score_v3"
     params = {"ticker": ticker, "event_date": str(event_date)}
 
     cached = await get_cached(db, cache_key, params)

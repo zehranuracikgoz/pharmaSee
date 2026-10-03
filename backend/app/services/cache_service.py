@@ -68,6 +68,17 @@ async def set_cached(
     await db.commit()
 
 
+async def invalidate_cached(db: AsyncSession, endpoint: str, params: dict) -> None:
+    """drop the cache entry for one key so the next read fetches fresh data"""
+    await db.execute(
+        delete(CacheEntry).where(
+            CacheEntry.endpoint ==endpoint,
+            CacheEntry.params_hash == _make_hash(endpoint, params),
+        )
+    )
+    await db.commit()
+
+
 async def purge_expired(db: AsyncSession) -> int:
     """Delete all expired cache entries. Meant to be called by a scheduler."""
     result = await db.execute(
