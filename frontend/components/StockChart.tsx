@@ -11,6 +11,7 @@ import {
   ReferenceLine ,
 } from "recharts";
 import type { StockPricePoint } from "@/lib/api";
+import { chartColors } from "@/lib/theme";
 import { format, parseISO } from "date-fns";
 
 interface Props {
@@ -20,12 +21,12 @@ interface Props {
   height?: number;
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload }: any) => {
   if (active && payload?.length) {
     return(
-      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm shadow-sm">
-        <p className="text-slate-400 text-xs mb-1">{label}</p>
-        <p className="text-slate-900 font-mono font-semibold">
+      <div className="bg-surface border border-border rounded-lg px-3 py-2 text-sm shadow-sm">
+        <p className="text-muted text-xs mb-1">{payload[0].payload.label}</p>
+        <p className="text-text font-mono font-semibold">
           ${Number(payload[0].value).toFixed(2)}
         </p>
       </div>
@@ -35,17 +36,17 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 export default function StockChart({
   data,
-  color = "#2563eb",
+  color = chartColors.accent,
   approvalDates = [],
   height =280,
 }: Props) {
   if (!data.length) {
     return (
       <div
-        className="flex items-center justify-center text-slate-400 text-sm bg-slate-100 rounded-xl"
+        className="flex items-center justify-center text-muted text-sm bg-surface2 rounded-xl"
         style={{ height }}
       >
-        Fiyat verisi bulunamadı
+        No price data available
       </div>
     );
   }
@@ -62,6 +63,17 @@ export default function StockChart({
     })(),
   }));
 
+  const labelByDate = new Map(chartData.map((d) => [d.date, d.label]));
+
+  // approvals on weekends/holidays snap to the next trading day in the chart
+  const approvalMarkers = Array.from(
+    new Set (
+      approvalDates
+        .map((d) =>chartData.find((p) => p.date >= d.slice(0, 10))?.date)
+        .filter((d): d is string => !!d && d !== chartData[0]?.date)
+    )
+  );
+
   const prices = chartData.map((d) => d.close ?? 0).filter(Boolean);
   const minPrice=Math.min(...prices);
   const maxPrice = Math.max(...prices);
@@ -70,28 +82,30 @@ export default function StockChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+        <CartesianGrid strokeDasharray="3 3" stroke={chartColors.border} />
+        {/* ISO date as the key so FDA ReferenceLines (x = ISO date) line up; ticks show "MMM d" */}
         <XAxis
-          dataKey="label"
-          tick={{ fill: "#94a3b8", fontSize: 11 }}
+          dataKey="date"
+          tickFormatter={(v: string) => labelByDate.get(v) ?? v}
+          tick={{ fill: chartColors.textMuted, fontSize: 11 }}
           tickLine={false}
-          axisLine={{ stroke: "#cbd5e1" }}
+          axisLine={{ stroke: chartColors.border }}
           interval="preserveStartEnd"
         />
         <YAxis
           domain={[minPrice - padding, maxPrice + padding]}
-          tick={{ fill: "#94a3b8", fontSize: 11 }}
+          tick={{ fill: chartColors.textMuted, fontSize: 11 }}
           tickLine={false}
           axisLine={false}
           tickFormatter={(v) => `$${v.toFixed(0)}`}
           width={50}
         />
-        <Tooltip content={<CustomTooltip />} />
-        {approvalDates.map((d) => (
+        <Tooltip content={<CustomTooltip />} cursor={{ stroke: chartColors.border }} />
+        {approvalMarkers.map((d) => (
           <ReferenceLine
             key={d}
-            x={d.slice(0, 10)}
-            stroke = "#f59e0b"
+            x={d}
+            stroke={chartColors.success}
             strokeDasharray="4 2"
             strokeWidth={1.5}
           />

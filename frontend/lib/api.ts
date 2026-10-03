@@ -7,9 +7,24 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text}`);
+    throw new Error(errorDetail(text) ?? `API ${res.status}: ${text}`);
   }
   return res.json() as Promise<T>;
+}
+
+// fastapi errors: {"detail": "message"} or, for validation (422), {"detail": [{"msg": ...}, ...]}
+function errorDetail(body: string): string | null {
+  try {
+    const { detail } = JSON.parse(body);
+    if (typeof detail === "string" && detail) return detail;
+    if (Array.isArray(detail)) {
+      const msgs = detail.map((d) => d?.msg).filter((m): m is string => typeof m === "string");
+      if (msgs.length > 0) return msgs.join("; ");
+    }
+  } catch {
+    // not JSON — fall back to the raw body
+  }
+  return null;
 }
 
 // type

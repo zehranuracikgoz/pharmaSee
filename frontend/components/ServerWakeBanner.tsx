@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, X } from "lucide-react";
 
-const DISMISSED_KEY = "pharmasee_wake_banner_dismissed"; // localStorage: closed for good
-const SHOWN_KEY = "pharmasee_wake_banner_shown"; // sessionStorage: already shown this session
+const DISMISSED_KEY = "pharmasee_wake_banner_dismissed"; // user closed it, never show again
+const SHOWN_KEY = "pharmasee_wake_banner_shown"; // already shown in this session
 
-// storage can throw (private mode, blocked site data) — fail quietly
+// storage may be blocked (private mode), so ignore errors
 function read(storage: () => Storage, key: string) {
   try {
     return storage().getItem(key);
@@ -19,12 +19,12 @@ function write(storage: () => Storage, key: string) {
   try {
     storage().setItem(key, "1");
   } catch {
-    /* ignore */
+    // ignore
   }
 }
 
 export default function ServerWakeBanner() {
-  // hidden on the server render; decided on the client to avoid a hydration mismatch
+  // start hidden and decide in the browser, so server and client html match
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export default function ServerWakeBanner() {
 
   if (!visible) return null;
 
-  const dismiss = () => {
+  const dismiss = ()=>{
     write(() => localStorage, DISMISSED_KEY);
     setVisible(false);
   };
@@ -48,7 +48,7 @@ export default function ServerWakeBanner() {
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-2">
         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-        <p className="flex-1">
+        <p className = "flex-1">
           This app runs on Render&apos;s free tier — first load may take up to 60
           seconds while the server wakes up.
         </p>
@@ -59,6 +59,7 @@ export default function ServerWakeBanner() {
         >
           <X className="h-3.5 w-3.5" />
         </button>
+        
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { ArrowLeftRight, CalendarDays, Check, Download, RefreshCw, Star } from "lucide-react";
 import { api, Company } from "@/lib/api";
 import SearchBar from "@/components/SearchBar";
 import { getWatchlist } from "@/lib/watchlist";
@@ -18,54 +19,107 @@ function formatMarketCap(v?: number) {
   return `$${v.toFixed(0)}`;
 }
 
+function csvCell(value: string | number | undefined | null): string {
+  if (value ==null) return "";
+  let s = String(value);
+  // keep spreadsheet apps from evaluating text as a formula
+  if (typeof value === "string" && /^[=+\-@]/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCompaniesCsv(rows: Company[]) {
+  const lines = [
+    "ticker,name,sector,market_cap",
+    ...rows.map((c) =>
+      [c.ticker, c.name, c.sector, c.market_cap].map(csvCell).join(",")
+    ),
+  ];
+  // bom so excel opens the file as UTF-8
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href = url;
+  a.download = "pharmasee_companies.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function DashboardPage() {
+  const searchRef = useRef<HTMLInputElement>(null);
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState("");
-  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [initialLoad, setInitialLoad] = useState(true);
   const [listError, setListError] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [watchlist, setWatchlist] = useState<string[]>([]);
+
+  // Load watchlist
   useEffect(() => {
     setWatchlist(getWatchlist());
   }, []);
 
+  // "/" focuses the search box, unless the user is already typing somewhere
   useEffect(() => {
-    api
-      .companies()
-      .then((tracked) => {
-        setCompanies(tracked.map((t) => ({ ...t, loading: true })));
-
-        tracked.forEach(({ ticker, name }) => {
-          api
-            .stockInfo(ticker)
-            .then((info) => {
-              setCompanies((prev) =>
-                prev.map((c) =>
-                  c.ticker === ticker ? { ...info, loading: false } : c
-                )
-              );
-            })
-            .catch(() => {
-              setCompanies((prev) =>
-                prev.map((c) =>
-                  c.ticker === ticker ? { ticker, name, loading: false } : c
-                )
-              );
-            });
-        });
-      })
-      .catch((err) => {
-        setListError(err.message || "Şirket listesi alınamadı");
-      });
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable)) {
+        return;
+      }
+      e.preventDefault(); // don't type the "/" into the box
+      searchRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // /companies only returns ticker + name; market cap and sector are filled in per row
+  const enrich = (tickers: string[]) => {
+    tickers.forEach((ticker) => {
+      api
+        .stockInfo(ticker)
+        .then((info) =>
+          setCompanies((prev) =>
+            prev.map((c) => (c.ticker === ticker ? { ...c, ...info, loading: false } : c))
+          )
+        )
+        .catch(() =>
+          setCompanies((prev) =>
+            prev.map((c) => (c.ticker === ticker ? { ...c, loading: false } : c))
+          )
+        );
+    });
+  };
+
+  const loadCompanies = () =>
+    api.companies().then((list) => {
+      setListError("");
+      setCompanies(list.map((c) => ({ ...c, loading: true })));
+      enrich(list.map((c) => c.ticker));
+    });
+
+  // Load company list — one fast call, details fill in afterwards
+  useEffect(() => {
+    loadCompanies()
+      .then(() => setInitialLoad(false))
+      .catch((err) => {
+        setListError(err.message || "Could not load the company list");
+        setInitialLoad(false);
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSync = async () => {
     setSyncing(true);
-    setSyncMsg("");
+    setSyncMsg(null);
     try {
-      const r = await api.fdaSync();
-      setSyncMsg(r.message);
+      await api.fdaSync();
+      setSyncMsg({ ok: true, text: "Companies synced" });
+      // refresh the list after sync
+      await loadCompanies();
     } catch {
-      setSyncMsg("Sync başarısız oldu");
+      setSyncMsg({ ok: false, text: "Sync failed" });
     } finally {
       setSyncing(false);
     }
@@ -79,48 +133,57 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-          <p className="text-sm text-gray-400 mt-0.5">
-            Biotech hisseleri ve FDA onay verilerine genel bakış
+          <h1 className="text-2xl font-bold text-text">Dashboard</h1>
+          <p className="text-sm text-muted mt-0.5">
+            Overview of biotech stocks and FDA approval data
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <SearchBar />
+          <SearchBar inputRef={searchRef} />
           <button
             onClick={handleSync}
             disabled={syncing}
-            className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="inline-flex items-center gap-2 whitespace-nowrap shrink-0 bg-accent hover:bg-accent-hover disabled:opacity-50 text-bg text-sm font-medium px-4 py-2 rounded-lg transition-colors"
           >
-            {syncing ? "Senkronize ediliyor…" : "🔄 FDA Sync"}
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing…" : "Sync FDA"}
           </button>
         </div>
       </div>
 
       {syncMsg && (
-        <div className="text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-2">
-          ✓ {syncMsg}
+        <div
+          className={`flex items-center gap-2 text-sm rounded-lg px-4 py-2 border ${
+            syncMsg.ok
+              ? "text-success bg-success/10 border-success/20"
+              : "text-danger bg-danger/10 border-danger/20"
+          }`}
+        >
+          {syncMsg.ok && <Check className="h-4 w-4" />}
+          {syncMsg.text}
         </div>
       )}
 
       {watchlistCompanies.length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
-            ⭐ Watchlist
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-muted uppercase tracking-wide mb-3">
+            <Star className="h-4 w-4 text-warning" />
+            Watchlist
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {watchlistCompanies.map((c) => (
               <Link
                 key={c.ticker}
                 href={`/company/${c.ticker}`}
-                className="card p-4 hover:border-brand-500/50 transition-colors group"
+                className="card p-4 hover:border-accent/50 transition-colors group"
               >
-                <div className="badge-ticker group-hover:text-indigo-200 transition-colors">
+                <div className="badge-ticker group-hover:text-accent-hover transition-colors">
                   {c.ticker}
                 </div>
-                <div className="text-white font-medium text-sm mt-1 truncate">
+                <div className="text-text font-medium text-sm mt-1 truncate">
                   {c.name || c.ticker}
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">
+                <div className="text-xs text-muted mt-0.5">
                   {formatMarketCap(c.market_cap)}
                 </div>
               </Link>
@@ -129,157 +192,170 @@ export default function DashboardPage() {
         </section>
       )}
 
-      {/* for stats bar */}
+      {/* stats bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="card p-4">
-          <div className="stat-label">Toplam Şirket</div>
+          <div className="stat-label">Companies</div>
           <div className="stat-value">{companies.length}</div>
         </div>
         <div className="card p-4">
           <div className="stat-label">Watchlist</div>
           <div className="stat-value">{watchlist.length}</div>
         </div>
-        <div className = "card p-4">
-          <div className="stat-label">Veri Kaynağı</div>
-          <div className="text-lg font-bold text-indigo-300">OpenFDA</div>
+        <div className="card p-4">
+          <div className="stat-label">Data Source</div>
+          <div className="text-lg font-bold text-accent">OpenFDA</div>
         </div>
         <div className="card p-4">
-          <div className="stat-label">Hisse Verisi</div>
-          <div className="text-lg font-bold text-indigo-300">yfinance</div>
+          <div className="stat-label">Stock Data</div>
+          <div className="text-lg font-bold text-accent">yfinance</div>
         </div>
       </div>
 
-      {/* for company table */}
       <section>
-        <h2 className = "text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
-          Tüm Şirketler
-        </h2>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h2 className="text-sm font-semibold text-muted uppercase tracking-wide">
+            All Companies
+          </h2>
+          <button
+            onClick={() => downloadCompaniesCsv(companies)}
+            disabled={initialLoad || companies.length === 0}
+            className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-text bg-surface2 border border-border hover:border-accent/50 disabled:opacity-50 disabled:pointer-events-none px-2.5 py-1.5 rounded-md transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </button>
+        </div>
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-700/60">
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">
+                <tr className="border-b border-border/60">
+                  <th className="text-left px-4 py-3 text-muted font-medium">
                     Ticker
                   </th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">
-                    Şirket
+                  <th className="text-left px-4 py-3 text-muted font-medium">
+                    Company
                   </th>
-                  <th className ="text-left px-4 py-3 text-gray-400 font-medium hidden md:table-cell">
-                    Sektör
+                  <th className="text-left px-4 py-3 text-muted font-medium hidden md:table-cell">
+                    Sector
                   </th>
-                  <th className="text-right px-4 py-3 text-gray-400 font-medium">
-                    Piyasa Değeri
+                  <th className="text-right px-4 py-3 text-muted font-medium">
+                    Market Cap
                   </th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-700/40">
-                {listError ? (
+              <tbody className="divide-y divide-border/40">
+                {initialLoad ? (
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className="animate-pulse">
+                      <td className="px-4 py-3">
+                        <div className="h-4 bg-border rounded w-12" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="h-4 bg-border rounded w-40" />
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell">
+                        <div className="h-4 bg-border rounded w-24" />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="h-4 bg-border rounded w-20 ml-auto" />
+                      </td>
+                      <td className="px-4 py-3" />
+                    </tr>
+                  ))
+                ) : companies.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-red-500">
-                      {listError}
+                    <td
+                      colSpan ={5}
+                      className={`px-4 py-8 text-center ${listError ? "text-danger" : "text-muted"}`}
+                    >
+                      {listError || "No companies found. Click Sync FDA to populate."}
                     </td>
                   </tr>
-                ) : companies.length === 0
-                  ? Array.from({ length: 8 }).map((_, i) => (
-                      <tr key = {i} className="animate-pulse">
-                        <td className="px-4 py-3">
-                          <div className="h-4 bg-gray-700 rounded w-12" />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="h-4 bg-gray-700 rounded w-40" />
-                        </td>
-                        <td className="px-4 py-3 hidden md:table-cell">
-                          <div className="h-4 bg-gray-700 rounded w-24" />
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="h-4 bg-gray-700 rounded w-20 ml-auto" />
-                        </td>
-                        <td className="px-4 py-3" />
-                      </tr>
-                    ))
-                  : companies.map((c) => (
-                      <tr
-                        key={c.ticker}
-                        className="hover:bg-gray-700/30 transition-colors"
-                      >
-                        <td className="px-4 py-3">
-                          <span className="badge-ticker">{c.ticker}</span>
-                        </td>
-                        <td className="px-4 py-3 text-white">
-                          {c.loading ? (
-                            <div className="h-4 bg-gray-700 rounded w-32 animate-pulse" />
-                          ) : (
-                            c.name || c.ticker
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-400 hidden md:table-cell">
-                          {c.sector|| "Biotechnology"}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono text-gray-300">
-                          {c.loading ? (
-                            <div className="h-4 bg-gray-700 rounded w-16 ml-auto animate-pulse" />
-                          ) : (
-                            formatMarketCap(c.market_cap)
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <Link
-                            href={`/company/${c.ticker}`}
-                            className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
-                          >
-                            Detay
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
+                ) : (
+                  companies.map((c) => (
+                    <tr
+                      key={c.ticker}
+                      className="hover:bg-surface2 transition-colors"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="badge-ticker">{c.ticker}</span>
+                      </td>
+                      <td className="px-4 py-3 text-text">
+                        {c.name || c.ticker}
+                      </td>
+                      <td className="px-4 py-3 text-muted hidden md:table-cell">
+                        {c.loading ? (
+                          <div className="h-4 bg-border rounded w-24 animate-pulse" />
+                        ) : (
+                          c.sector || "Biotechnology"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-text">
+                        {c.loading ? (
+                          <div className="h-4 bg-border rounded w-16 ml-auto animate-pulse" />
+                        ) : (
+                          formatMarketCap(c.market_cap)
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Link
+                          href={`/company/${c.ticker}`}
+                          className="text-xs text-accent hover:text-accent-hover font-medium"
+                        >
+                          Details →
+                        </Link>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </div>
       </section>
 
-      {/* for quick links */}
+      {/* Quick links */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Link
           href="/calendar"
-          className="card p-5 hover:border-amber-500/40 transition-colors group"
+          className="card p-5 hover:border-accent/40 transition-colors group"
         >
-          <div className="text-2xl mb-2">📅</div>
-          <div className="font-semibold text-white group-hover:text-amber-300 transition-colors">
-            FDA Takvim
+          <CalendarDays className="h-6 w-6 text-accent mb-3" />
+          <div className="font-semibold text-text group-hover:text-accent-hover transition-colors">
+            FDA Calendar
           </div>
-          <div className="text-xs text-gray-400 mt-1">
-            Yaklaşan FDA onay kararları
+          <div className="text-xs text-muted mt-1">
+            Upcoming FDA approval decisions
           </div>
         </Link>
         <Link
           href="/compare"
-          className="card p-5 hover:border-brand-500/40 transition-colors group"
+          className="card p-5 hover:border-accent/40 transition-colors group"
         >
-          <div className = "text-2xl mb-2">⚖️</div>
-          <div className="font-semibold text-white group-hover:text-indigo-300 transition-colors">
-            Şirket Karşılaştır
+          <ArrowLeftRight className="h-6 w-6 text-accent mb-3" />
+          <div className="font-semibold text-text group-hover:text-accent-hover transition-colors">
+            Compare Companies
           </div>
-          <div className="text-xs text-gray-400 mt-1">
-            İki ticker yan yana grafik
+          <div className="text-xs text-muted mt-1">
+            Two tickers side by side
           </div>
         </Link>
         <Link
           href="/watchlist"
-          className="card p-5 hover:border-emerald-500/40 transition-colors group"
+          className="card p-5 hover:border-accent/40 transition-colors group"
         >
-          <div className="text-2xl mb-2">⭐</div>
-          <div className="font-semibold text-white group-hover:text-emerald-300 transition-colors">
+          <Star className="h-6 w-6 text-warning mb-3" />
+          <div className="font-semibold text-text group-hover:text-accent-hover transition-colors">
             Watchlist
           </div>
-          <div className="text-xs text-gray-400 mt-1">
-            Takip ettiğin şirketler
+          <div className="text-xs text-muted mt-1">
+            Companies you follow
           </div>
         </Link>
       </section>
-
     </div>
   );
 }

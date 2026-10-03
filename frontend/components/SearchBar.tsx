@@ -2,9 +2,15 @@
 
 import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { Search } from "lucide-react";
 import { api, Company } from "@/lib/api";
 
-export default function SearchBar() {
+interface Props {
+  // lets the page focus the input (e.g. the "/" shortcut); also shows the shortcut hint
+  inputRef?: React.Ref<HTMLInputElement>;
+}
+
+export default function SearchBar({ inputRef }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Company[]>([]);
   const [loading, setLoading] = useState(false);
@@ -37,26 +43,34 @@ export default function SearchBar() {
     <div className="relative w-full max-w-sm">
       <div className="relative">
         <input
+          ref={inputRef}
           type="text"
+          aria-label="Search company or ticker"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
             search(e.target.value);
           }}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
-          placeholder="Şirket veya ticker ara…"
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+          placeholder="Search company or ticker…"
+          className="w-full bg-surface border border-border rounded-lg pl-9 pr-4 py-2 text-sm text-text placeholder-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
         />
-        <span className="absolute left-3 top-2.5 text-gray-500 text-sm">🔍</span>
-        {loading && (
-          <span className="absolute right-3 top-2.5 text-gray-500 text-xs animate-pulse">
+        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted pointer-events-none" />
+        {loading ? (
+          <span className="absolute right-3 top-2.5 text-muted text-xs animate-pulse">
             …
           </span>
+        ) : (
+          inputRef && !query && (
+            <kbd className="absolute right-2.5 top-2 rounded border border-border bg-surface2 px-1.5 text-[11px] font-mono text-muted pointer-events-none">
+              /
+            </kbd>
+          )
         )}
       </div>
 
       {open && results.length > 0 && (
-        <div className =" absolute top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+        <div className =" absolute top-full mt-1 w-full bg-surface border border-border rounded-lg shadow-xl z-50 overflow-hidden">
           {results.map((c) => (
             <button
               key={c.ticker}
@@ -65,14 +79,14 @@ export default function SearchBar() {
                 setOpen(false);
                 setQuery("");
               }}
-              className = "w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-700 text-left transition-colors"
+              className = "w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface2 text-left transition-colors"
             >
-              <span className="font-mono font-bold text-indigo-300 text-sm w-16">
+              <span className="font-mono font-bold text-accent text-sm w-16">
                 {c.ticker}
               </span>
-              <span className="text-white text-sm truncate">{c.name}</span>
+              <span className="text-text text-sm truncate">{c.name}</span>
               {c.sector && (
-                <span className="ml-auto text-xs text-gray-500 shrink-0">
+                <span className="ml-auto text-xs text-muted shrink-0">
                   {c.sector}
                 </span>
               )}
@@ -82,8 +96,8 @@ export default function SearchBar() {
       )}
 
       {open && results.length ===0 && !loading && query && (
-        <div className="absolute top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 px-4 py-3 text-sm text-gray-500">
-          Sonuç bulunamadı
+        <div className="absolute top-full mt-1 w-full bg-surface border border-border rounded-lg shadow-xl z-50 px-4 py-3 text-sm text-muted">
+          No results found
         </div>
       )}
     </div>

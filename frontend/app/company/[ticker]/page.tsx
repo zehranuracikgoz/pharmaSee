@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { AlertTriangle, Star } from "lucide-react";
 import { api, CompanyProfileOut } from "@/lib/api";
 import StockChart from "@/components/StockChart";
 import MomentumBadge from "@/components/MomentumBadge";
@@ -53,7 +54,7 @@ export default function CompanyPage() {
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.message || "Şirket verisi alınamadı");
+        setError(err.message || "Could not load company data");
         setLoading(false);
       });
   }, [ticker]);
@@ -71,8 +72,8 @@ export default function CompanyPage() {
   if (loading) {
     return (
       <div className="space-y-4 animate-pulse">
-        <div className="h-8 bg-gray-700 rounded w-64" />
-        <div className="h-72 bg-gray-800 rounded-xl" />
+        <div className="h-8 bg-border rounded w-64" />
+        <div className="h-72 bg-surface rounded-xl" />
       </div>
     );
   }
@@ -80,13 +81,13 @@ export default function CompanyPage() {
   if (error) {
     return (
       <div className= "card p-8 text-center">
-        <div className="text-4xl mb-3">⚠️</div>
-        <p className="text-red-400 font-medium">{error}</p>
+        <AlertTriangle className="h-10 w-10 text-warning mx-auto mb-3" />
+        <p className="text-danger font-medium">{error}</p>
         <button
           onClick={() =>router.back()}
-          className= "mt-4 text-sm text-indigo-400 hover:text-indigo-300"
+          className= "mt-4 text-sm text-accent hover:text-accent-hover"
         >
-          ← Geri dön
+          ← Go back
         </button>
       </div>
     );
@@ -110,45 +111,57 @@ export default function CompanyPage() {
   return (
     <div className="space-y-6">
       {/*breadcrumb */}
-      <div className ="flex items-center gap-2 text-sm text-gray-400">
-        <Link href="/" className="hover:text-white transition-colors">
+      <div className ="flex items-center gap-2 text-sm text-muted">
+        <Link href="/" className="hover:text-text transition-colors">
           Dashboard
         </Link>
         <span>/</span>
-        <span className="text-white font-medium">{ticker}</span>
+        <span className="text-text font-medium">{ticker}</span>
       </div>
 
       {/* header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
 
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-white">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-text">
               {company.name || ticker}
             </h1>
             <span className="badge-ticker text-base">({ticker})</span>
+            {latest_price != null && (
+              <span className="inline-flex items-baseline gap-2 rounded-lg bg-surface2 border border-border px-2.5 py-1 font-mono text-sm">
+                <span className="font-semibold text-text">{formatPrice(latest_price)}</span>
+                {price_change_pct_1d != null && (
+                  <span className={price_change_pct_1d >= 0 ? "text-success" : "text-danger"}>
+                    {price_change_pct_1d >= 0 ? "+" : ""}
+                    {price_change_pct_1d.toFixed(2)}%
+                  </span>
+                )}
+              </span>
+            )}
           </div>
-          <p className="text-sm text-gray-400 mt-0.5">
-            {company.sector || "Biotechnology"} · Piyasa Değeri:{" "}
+          <p className="text-sm text-muted mt-0.5">
+            {company.sector || "Biotechnology"} · Market Cap:{" "}
             {formatBig(company.market_cap)}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Link
             href={`/compare?a=${ticker}`}
-            className="text-sm bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg transition-colors"
+            className="text-sm bg-surface2 border border-border hover:border-accent/50 text-text px-3 py-1.5 rounded-lg transition-colors"
           >
-            Karşılaştır
+            Compare
           </Link>
           <button
             onClick={toggleWatchlist}
-            className={`text-sm px-3 py-1.5 rounded-lg font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium border transition-colors ${
               watched
-                ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 ring-1 ring-amber-500/40"
-                : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                ? "bg-warning/10 text-warning border-warning/40 hover:bg-warning/20"
+                : "bg-surface2 border-border hover:border-accent/50 text-text"
             }`}
           >
-            {watched ? "⭐ Watchlist'te" : "☆ Watchlist'e Ekle"}
+            <Star className={`h-4 w-4 ${watched ? "fill-current" : ""}`} />
+            {watched ? "In Watchlist" : "Add to Watchlist"}
           </button>
         </div>
       </div>
@@ -156,32 +169,32 @@ export default function CompanyPage() {
       {/* stat cards*/}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="card p-4">
-          <div className="stat-label">Son Kapanış</div>
+          <div className="stat-label">Last Close</div>
           <div className="stat-value text-xl">
             {formatPrice(latest_price)}
           </div>
           {price_change_pct_1d != null && (
             <div
               className={`text-xs mt-1 font-mono ${
-                price_change_pct_1d >= 0 ? "text-emerald-600" : "text-rose-600"
+                price_change_pct_1d >= 0 ? "text-success" : "text-danger"
               }`}
             >
-              {price_change_pct_1d >= 0 ? "▲" : "▼"} {Math.abs(price_change_pct_1d).toFixed(2)}% (1G)
+              {price_change_pct_1d >= 0 ? "▲" : "▼"} {Math.abs(price_change_pct_1d).toFixed(2)}% (1D)
             </div>
           )}
         </div>
         <div className = "card p-4">
-          <div className="stat-label">Ortalama Momentum</div>
+          <div className="stat-label">Avg. Momentum</div>
           <div className="mt-2">
             <MomentumBadge momentum={avgMomentum} size="lg" />
           </div>
         </div>
         <div className="card p-4">
-          <div className="stat-label">FDA Onayları</div>
+          <div className="stat-label">FDA Approvals</div>
           <div className="stat-value text-xl">{approvals.length}</div>
         </div>
         <div className="card p-4">
-          <div className="stat-label">Momentum Olayları</div>
+          <div className="stat-label">Momentum Events</div>
           <div className="stat-value text-xl">{momentum_scores.length}</div>
         </div>
       </div>
@@ -189,7 +202,7 @@ export default function CompanyPage() {
       {/* stock chart */}
       <div className="card">
         <div className="card-header justify-between">
-          <span className="font-semibold text-white">📈 Hisse Fiyatı</span>
+          <span className="font-semibold text-text">Stock Price</span>
           <div className="flex items-center gap-1">
             {[30, 90, 180, 365].map((d) => (
               <button
@@ -197,11 +210,11 @@ export default function CompanyPage() {
                 onClick={() => setPeriod(d)}
                 className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
                   period === d
-                    ? "bg-brand-600 text-white"
-                    : "text-gray-400 hover:bg-gray-700 hover:text-white"
+                    ? "bg-accent text-bg"
+                    : "text-muted hover:bg-surface2 hover:text-text"
                 }`}
               >
-                {d === 30 ? "1A" : d === 90 ? "3A" : d === 180 ? "6A" : "1Y"}
+                {d === 30 ? "1M" : d === 90 ? "3M" : d === 180 ? "6M" : "1Y"}
               </button>
             ))}
           </div>
@@ -213,8 +226,8 @@ export default function CompanyPage() {
             approvalDates={approvalDates}
           />
           {approvalDates.length > 0 && (
-            <p className="text-xs text-amber-400/80 mt-2">
-              — Sarı çizgiler FDA onay tarihlerini gösterir
+            <p className="text-xs text-success/80 mt-2">
+              — Green lines mark FDA approval dates
             </p>
           )}
         </div>
@@ -224,38 +237,38 @@ export default function CompanyPage() {
       {momentum_scores.length > 0 && (
         <div className="card">
           <div className="card-header">
-            <span className="font-semibold text-white">🚀 Momentum Skorları</span>
-            <span className="text-xs text-gray-500 ml-auto">
-              T-30 → T-1 performansı
+            <span className="font-semibold text-text">Momentum Scores</span>
+            <span className="text-xs text-muted ml-auto">
+              T-30 → T-1 performance
             </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-700/60">
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">Olay Tarihi</th>
-                  <th className="text-right px-4 py-3 text-gray-400 font-medium">T-30 Fiyat</th>
-                  <th className="text-right px-4 py-3 text-gray-400 font-medium">T-1 Fiyat</th>
-                  <th className="text-right px-4 py-3 text-gray-400 font-medium">Momentum</th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium hidden md:table-cell">Yorum</th>
+                <tr className="border-b border-border/60">
+                  <th className="text-left px-4 py-3 text-muted font-medium">Event Date</th>
+                  <th className="text-right px-4 py-3 text-muted font-medium">T-30 Price</th>
+                  <th className="text-right px-4 py-3 text-muted font-medium">T-1 Price</th>
+                  <th className="text-right px-4 py-3 text-muted font-medium">Momentum</th>
+                  <th className="text-left px-4 py-3 text-muted font-medium hidden md:table-cell">Interpretation</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-700/40">
+              <tbody className="divide-y divide-border/40">
                 {momentum_scores.map((m, i) => (
-                  <tr key={i} className="hover:bg-gray-700/20">
-                    <td className="px-4 py-3 text-gray-300 font-mono text-xs">
+                  <tr key={i} className="hover:bg-surface2">
+                    <td className="px-4 py-3 text-text font-mono text-xs">
                       {m.event_date}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-gray-300">
+                    <td className="px-4 py-3 text-right font-mono text-text">
                       {formatPrice(m.t_minus_30_price)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-gray-300">
+                    <td className="px-4 py-3 text-right font-mono text-text">
                       {formatPrice(m.t_minus_1_price)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <MomentumBadge momentum={m.momentum_pct} size="sm" />
                     </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs hidden md:table-cell">
+                    <td className="px-4 py-3 text-muted text-xs hidden md:table-cell">
                       {m.interpretation || "—"}
                     </td>
                   </tr>
@@ -270,49 +283,49 @@ export default function CompanyPage() {
       {/* fda approvals */}
       <div className = "card">
         <div className="card-header">
-          <span className="font-semibold text-white">💊 FDA Onayları</span>
-          <span className="text-xs text-gray-500 ml-auto">
-            {approvals.length} kayıt
+          <span className="font-semibold text-text">FDA Approvals</span>
+          <span className="text-xs text-muted ml-auto">
+            {approvals.length} {approvals.length === 1 ? "record" : "records"}
           </span>
         </div>
         {approvals.length === 0 ? (
-          <div className="card-body text-gray-500 text-sm">
-            Henüz FDA onay verisi yok
+          <div className="card-body text-muted text-sm">
+            No FDA approval data yet
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-700/60">
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">İlaç</th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium hidden sm:table-cell">Marka</th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">Tarih</th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium hidden md:table-cell">Tür</th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">Durum</th>
+                <tr className="border-b border-border/60">
+                  <th className="text-left px-4 py-3 text-muted font-medium">Drug</th>
+                  <th className="text-left px-4 py-3 text-muted font-medium hidden sm:table-cell">Brand</th>
+                  <th className="text-left px-4 py-3 text-muted font-medium">Date</th>
+                  <th className="text-left px-4 py-3 text-muted font-medium hidden md:table-cell">Type</th>
+                  <th className="text-left px-4 py-3 text-muted font-medium">Status</th>
                 </tr>
 
               </thead>
-              <tbody className="divide-y divide-gray-700/40">
+              <tbody className="divide-y divide-border/40">
                 {approvals.map((a) => (
-                  <tr key={a.id} className="hover:bg-gray-700/20">
-                    <td className="px-4 py-3 text-white font-medium">
+                  <tr key={a.id} className="hover:bg-surface2">
+                    <td className="px-4 py-3 text-text font-medium">
                       {a.drug_name}
                     </td>
-                    <td className="px-4 py-3 text-gray-400 hidden sm:table-cell">
+                    <td className="px-4 py-3 text-muted hidden sm:table-cell">
                       {a.brand_name || "—"}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-300">
+                    <td className="px-4 py-3 font-mono text-xs text-text">
                       {formatDate(a.approval_date)}
                     </td>
-                    <td className="px-4 py-3 text-gray-400 hidden md:table-cell">
+                    <td className="px-4 py-3 text-muted hidden md:table-cell">
                       {a.application_type || "—"}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           a.status === "Approved"
-                            ? "bg-emerald-500/20 text-emerald-400"
-                            : "bg-gray-700 text-gray-400"
+                            ? "bg-success/20 text-success"
+                            : "bg-surface2 text-muted"
                         }`}
                       >
                         {a.status || "—"}
@@ -329,10 +342,10 @@ export default function CompanyPage() {
       {/* description */}
       {company.description && (
         <div className="card p-5">
-          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">
-            Şirket Hakkında
+          <h3 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
+            About the Company
           </h3>
-          <p className="text-gray-300 text-sm leading-relaxed">
+          <p className="text-text text-sm leading-relaxed">
             {company.description}
           </p>
         </div>
@@ -372,8 +385,8 @@ function StockChartLoader({
 
   if (loading) {
     return (
-      <div className="h-72 bg-gray-800/60 rounded-xl animate-pulse flex items-center justify-center text-gray-500 text-sm">
-        Grafik yükleniyor…
+      <div className="h-72 bg-surface2 rounded-xl animate-pulse flex items-center justify-center text-muted text-sm">
+        Loading chart…
       </div>
     );
   }

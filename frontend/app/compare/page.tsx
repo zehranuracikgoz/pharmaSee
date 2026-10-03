@@ -13,6 +13,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { api, CompareOut } from "@/lib/api";
+import { chartColors } from "@/lib/theme";
 import Link from "next/link";
 
 function CompareInner() {
@@ -26,8 +27,18 @@ function CompareInner() {
       .catch(() => setTickers([]));
   }, []);
 
-  const [tickerA, setTickerA] = useState(params?.get("a") ?? "MRNA");
-  const [tickerB, setTickerB] = useState(params?.get("b") ?? "BNTX");
+  // missing, empty or literal "undefined"/"null" params fall back to the defaults
+  const tickerParam = (key: string, fallback: string) => {
+    const v = params?.get(key)?.trim().toUpperCase();
+    return v && v !== "UNDEFINED" && v !== "NULL" ? v : fallback;
+  };
+  const initialA = tickerParam("a", "MRNA");
+  let initialB = tickerParam("b", "BNTX");
+  // e.g. /compare?a=BNTX: don't start with the same ticker on both sides
+  if (initialB === initialA) initialB = initialA === "MRNA" ? "BNTX" : "MRNA";
+
+  const [tickerA, setTickerA] = useState(initialA);
+  const [tickerB, setTickerB] = useState(initialB);
   const [period, setPeriod] = useState(365);
   const [data, setData] = useState<CompareOut | null>(null);
   const [loading, setLoading] = useState(false);
@@ -41,7 +52,7 @@ function CompareInner() {
       const r = await api.compareCompanies(a, b, p);
       setData(r);
     } catch (e: any) {
-      setError(e.message || "Veri alınamadı");
+      setError(e.message || "Could not load data");
     } finally {
       setLoading(false);
     }
@@ -74,9 +85,9 @@ function CompareInner() {
     <div className="space-y-6">
       {/* header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Şirket Karşılaştırma</h1>
-        <p className="text-sm text-gray-400 mt-0.5">
-          İki biyoteknoloji şirketini yan yana analiz edin
+        <h1 className="text-2xl font-bold text-text">Compare Companies</h1>
+        <p className="text-sm text-muted mt-0.5">
+          Analyze two biotech companies side by side
         </p>
       </div>
 
@@ -84,11 +95,11 @@ function CompareInner() {
       <div className="card p-5">
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-36">
-            <label className = "stat-label block mb-1.5">Şirket A</label>
+            <label className = "stat-label block mb-1.5">Company A</label>
             <select
               value={tickerA}
               onChange={(e) => setTickerA(e.target.value)}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              className="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-accent"
             >
               {optionsFor(tickerA, tickerB).map((t) => (
                 <option key={t} value={t}>{t}</option>
@@ -96,14 +107,14 @@ function CompareInner() {
             </select>
           </div>
 
-          <div className="text-gray-400 text-lg pb-2">vs</div>
+          <div className="text-muted text-lg pb-2">vs</div>
 
           <div className="flex-1 min-w-36">
-            <label className="stat-label block mb-1.5">Şirket B</label>
+            <label className="stat-label block mb-1.5">Company B</label>
             <select
               value={tickerB}
               onChange={(e) => setTickerB(e.target.value)}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              className="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-accent"
             >
               {optionsFor(tickerB, tickerA).map((t) => (
                 <option key={t} value={t}>{t}</option>
@@ -111,19 +122,19 @@ function CompareInner() {
             </select>
           </div>
           <div>
-            <label className="stat-label block mb-1.5">Süre</label>
+            <label className="stat-label block mb-1.5">Period</label>
             <div className="flex gap-1">
               {[90, 180, 365].map((d) => (
                 <button
                   key={d}
-                  onClick={() => setPeriod(d)}
+                  onClick={() => { setPeriod(d); if (tickerA !== tickerB) load(tickerA, tickerB, d); }}
                   className={`text-xs px-3 py-2 rounded-md transition-colors ${
                     period === d
-                      ?"bg-brand-600 text-white"
-                      : "bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-white"
+                      ? "bg-accent text-bg"
+                      : "bg-surface2 text-muted hover:bg-accent/15 hover:text-text"
                   }`}
                 >
-                  {d === 90 ? "3A" : d === 180 ? "6A" : "1Y"}
+                  {d === 90 ? "3M" : d === 180 ? "6M" : "1Y"}
                 </button>
               ))}
             </div>
@@ -131,19 +142,19 @@ function CompareInner() {
           <button
             onClick={() => load(tickerA, tickerB, period)}
             disabled={loading || tickerA === tickerB}
-            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+            className="bg-accent hover:bg-accent-hover disabled:opacity-50 text-bg text-sm font-medium px-5 py-2 rounded-lg transition-colors"
           >
-            {loading ? "Yükleniyor…" : "Karşılaştır"}
+            {loading ? "Loading…" : "Compare"}
           </button>
         </div>
 
         {tickerA === tickerB && (
-          <p className="text-amber-400 text-xs mt-2">
-            Farklı iki şirket seçin
+          <p className="text-warning text-xs mt-2">
+            Select two different companies
           </p>
         )}
         {error && (
-          <p className="text-red-400 text-sm mt-2">{error}</p>
+          <p className="text-danger text-sm mt-2">{error}</p>
         )}
       </div>
 
@@ -151,22 +162,22 @@ function CompareInner() {
       {data && chartData.length > 0 && (
         <div className="card">
           <div className="card-header">
-            <span className="font-semibold text-white">📊 Hisse Fiyatı Karşılaştırması</span>
+            <span className="font-semibold text-text">Stock Price Comparison</span>
           </div>
           <div className="card-body">
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartColors.border} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fill: "#6b7280", fontSize: 11 }}
+                  tick={{ fill: chartColors.textMuted, fontSize: 11 }}
                   tickLine={false}
-                  axisLine={{ stroke: "#374151" }}
+                  axisLine={{ stroke: chartColors.border }}
                   interval="preserveStartEnd"
                   tickFormatter = {(v: string)=> v.slice(5)}
                 />
                 <YAxis
-                  tick={{ fill: "#6b7280", fontSize: 11 }}
+                  tick={{ fill: chartColors.textMuted, fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(v: number) => `$${v.toFixed(0)}`}
@@ -174,19 +185,20 @@ function CompareInner() {
                 />
                 <Tooltip
                   contentStyle={{
-                    background: "#1f2937",
-                    border: "1px solid #374151 ",
+                    background: chartColors.surface,
+                    border: `1px solid ${chartColors.border}`,
                     borderRadius: "8px",
                     fontSize: 12,
                   }}
-                  labelStyle={{ color: "#9ca3af", marginBottom: 4 }}
-                  formatter={(v: number) => [`$${v.toFixed(2)}`]}
+                  labelStyle={{ color: chartColors.textMuted, marginBottom: 4 }}
+                  cursor={{ stroke: chartColors.border }}
+                  formatter={(v: number, name: string) => [`$${v.toFixed(2)}`, name]}
                 />
-                <Legend wrapperStyle={{ fontSize: 12, color: "#9ca3af" }} />
+                <Legend wrapperStyle={{ fontSize: 12, color: chartColors.textMuted }} />
                 <Line
                   type="monotone"
                   dataKey={tickerA}
-                  stroke="#818cf8"
+                  stroke={chartColors.accent}
                   strokeWidth={2}
                   dot = {false}
                   connectNulls
@@ -194,7 +206,7 @@ function CompareInner() {
                 <Line
                   type="monotone"
                   dataKey={tickerB}
-                  stroke="#34d399"
+                  stroke={chartColors.success}
                   strokeWidth={2}
                   dot={false}
                   connectNulls
@@ -214,27 +226,27 @@ function CompareInner() {
             <div key={ticker} className="card">
               <div className="card-header">
                 <span className="badge-ticker text-base">{ticker}</span>
-                <span className="text-white font-medium ml-1">
+                <span className="text-text font-medium ml-1">
                   {company?.name || ticker}
                 </span>
                 <Link
                   href={`/company/${ticker}`}
-                  className="ml-auto text-xs text-indigo-400 hover:text-indigo-300"
+                  className="ml-auto text-xs text-accent hover:text-accent-hover"
                 >
-                  Detay →
+                  Details →
                 </Link>
               </div>
               <div className = "card-body space-y-3">
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <div className="stat-label">Sektör</div>
-                    <div className="text-white mt-0.5">
+                    <div className="stat-label">Sector</div>
+                    <div className="text-text mt-0.5">
                       {company?.sector || "Biotechnology"}
                     </div>
                   </div>
                   <div>
-                    <div className="stat-label">FDA Onayları</div>
-                    <div className="text-white mt-0.5 font-bold text-lg">
+                    <div className="stat-label">FDA Approvals</div>
+                    <div className="text-text mt-0.5 font-bold text-lg">
                       {approvals.length}
                     </div>
                   </div>
@@ -243,17 +255,17 @@ function CompareInner() {
 
                 {approvals.length > 0 && (
                   <div>
-                    <div className="stat-label mb-2">Son Onaylar</div>
+                    <div className="stat-label mb-2">Recent Approvals</div>
                     <ul className="space-y-1.5">
                       {approvals.slice(0, 4).map((a) => (
                         <li
                           key={a.id}
                           className="flex items-center justify-between text-xs"
                         >
-                          <span className="text-gray-300 truncate mr-2">
+                          <span className="text-text truncate mr-2">
                             {a.drug_name}
                           </span>
-                          <span className="text-gray-500 shrink-0 font-mono">
+                          <span className="text-muted shrink-0 font-mono">
                             {a.approval_date?.slice(0, 10) ?? "—"}
                           </span>
                         </li>
@@ -269,8 +281,8 @@ function CompareInner() {
       )}
 
       {loading && !data && (
-        <div className="card p-8 text-center text-gray-500">
-          Karşılaştırma verileri yükleniyor…
+        <div className="card p-8 text-center text-muted">
+          Loading comparison data…
         </div>
       )}
     </div>
@@ -278,7 +290,7 @@ function CompareInner() {
 }
 export default function ComparePage() {
   return (
-    <Suspense fallback={<div className="text-gray-400 p-8">Yükleniyor…</div>}>
+    <Suspense fallback={<div className="text-muted p-8">Loading…</div>}>
       <CompareInner />
       
     </Suspense>

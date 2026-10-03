@@ -4,21 +4,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Single dark theme. Keep in sync with lib/theme.ts (chart colors). */
 :root {
-  --bg-primary: #f8fafc;
-  --bg-secondary: #ffffff;
-  --bg-card: #ffffff;
-  --border: #e2e8f0;
-  --text-heading: #0f172a;
-  --text-body: #334155;
-  --text-muted: #94a3b8;
+  --color-bg: #07111d;
+  --color-surface: #0e1f2e;
+  --color-surface-2: #142333;
+  --color-border: #1e3448;
+  --color-text: #dce8f5;
+  --color-muted: #6b8aaa;
+  --color-accent: #0ea5e9;
+  --color-accent-hover: #38bdf8;
+  --color-success: #10b981;
+  --color-danger: #f43f5e;
+  --color-warning: #f59e0b;
+
+  color-scheme: dark;
 }
 
 body {
-  background-color: var(--bg-primary);
-  color: var(--text-body);
+  background-color: var(--color-bg);
+  color: var(--color-text);
   font-family: "Plus Jakarta Sans", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 /* Custom scrollbar */
@@ -30,33 +41,31 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius : 3px;
+  background: var(--color-border);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--color-muted);
 }
 
-/* Card base */
 @layer components {
   .card {
-    @apply bg-white border border-slate-200 rounded-xl shadow-sm;
+    @apply bg-surface border border-border rounded-xl;
   }
   .card-header {
-    @apply px-5 py-4 border-b border-slate-200 flex items-center gap-2;
+    @apply px-5 py-4 border-b border-border flex items-center gap-2;
   }
-
   .card-body {
     @apply px-5 py-4;
   }
   .badge-ticker {
-    @apply font-mono font-bold text-cyan-600 text-sm;
+    @apply font-mono font-bold text-accent text-sm;
   }
   .stat-label {
-    @apply text-xs text-slate-400 uppercase tracking-wide;
+    @apply text-xs text-muted uppercase tracking-wide;
   }
   .stat-value {
-    @apply text-2xl font-bold text-slate-900;
+    @apply text-2xl font-bold;
+    color: var(--color-text);
   }
-
 }
