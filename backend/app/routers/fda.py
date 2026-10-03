@@ -10,6 +10,7 @@ from app.services.fda_service import (
     upsert_approvals,
 )
 from app.models.models import DrugApproval
+from app.security import require_admin
 from sqlalchemy import select
 
 router = APIRouter(prefix="/fda", tags=["FDA"])
@@ -56,7 +57,7 @@ async def clinical_trials(
     return await fetch_clinical_trials(ticker, db)
 
 
-@router.post("/sync", summary="Sync the company list")
+@router.post("/sync", summary="Sync the company list", dependencies=[Depends(require_admin)])
 async def sync(db: AsyncSession = Depends(get_db)):
     """
     Insert every company from TRACKED_TICKERS into the database.

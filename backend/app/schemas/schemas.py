@@ -108,6 +108,24 @@ class CompareOut(BaseModel):
     approvals_b:list[DrugApprovalOut] = []
 
 
+# catalysts
+class CatalystOut(BaseModel):
+    id: int
+    ticker: str
+    event_type: str
+    drug: str | None = None
+    indication: str | None = None
+    date_text: str | None = None
+    event_date: date | None = None
+    date_precision: str
+    summary: str
+    source_quote: str
+    filing_url: str
+    accession_number: str
+
+    model_config = {"from_attributes": True}
+
+
 # search
 class SearchResultItem(BaseModel):
     ticker: str

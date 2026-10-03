@@ -17,6 +17,8 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.models import Company, DrugApproval
 from app.schemas.schemas import FDACalendarItem, FDACalendarOut
+from app.services.catalyst_service import process_pending_filings
+from app.services.sec_service import sync_sec_filings
 from app.services.stock_service import refresh_market_caps
 from app.services.cache_service import (
     get_cached,
@@ -181,7 +183,7 @@ async def upsert_approvals(ticker: str, db: AsyncSession) -> list[DrugApproval]:
     return list(result.scalars().all())
 
 async def run_scheduled_sync() -> None:
-    """daily sync: company list, fresh approvals and market caps for every ticker"""
+    """daily sync: company list, fresh approvals, market caps, sec filings and catalyst extraction"""
     async with AsyncSessionLocal() as db:
         await sync_companies(db)
         refreshed = 0
@@ -193,12 +195,19 @@ async def run_scheduled_sync() -> None:
             except Exception:
                 logger.exception("Scheduled FDA sync failed for %s", ticker)
         caps_updated, caps_no_data, caps_failed = await refresh_market_caps(db)
+        sec = await sync_sec_filings(db)
+        extraction = await process_pending_filings(db)
         purged=await purge_expired(db)
     logger.info(
         "scheduled sync done: approvals %d/%d refreshed | market caps %d updated, "
-        "%d no data, %d failed | %d expired cache entries purged",
+        "%d no data, %d failed | sec filings %d new, %d failed | catalysts %d saved from "
+        "%d filings (%d prefiltered, %d failed%s) | %d expired cache entries purged",
         refreshed, len(settings.TRACKED_TICKERS),
-        caps_updated, caps_no_data, caps_failed, purged,
+        caps_updated, caps_no_data, caps_failed,
+        sec["stored"], sec["failed"],
+        extraction["catalysts"], extraction["processed"], extraction["prefiltered"],
+        extraction["failed"], ", rate limited" if extraction["rate_limited"] else "",
+        purged,
     )
 
 

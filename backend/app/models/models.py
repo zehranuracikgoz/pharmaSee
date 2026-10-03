@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import BigInteger, String, Float, Integer, Date, DateTime, Text, ForeignKey, func
+from sqlalchemy import BigInteger, Boolean, String, Float, Integer, Date, DateTime, Text, ForeignKey, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -48,6 +48,43 @@ class StockPrice(Base):
     volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     company: Mapped["Company"] = relationship(back_populates="stock_prices")
+
+
+class SecFiling(Base):
+    """8-K / 6-K filing text, input for the catalyst extraction step"""
+    __tablename__ ="sec_filings"
+
+    accession_number: Mapped[str] = mapped_column(String(25), primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(10), index=True)
+    form: Mapped[str] = mapped_column(String(10))  # 8-K / 6-K
+    items: Mapped[str | None]= mapped_column(String(100), nullable=True)  # e.g. "7.01,9.01"
+    filed_date: Mapped[date] = mapped_column(Date)
+    url: Mapped[str] = mapped_column(String(500))
+    text: Mapped[str] = mapped_column(Text)
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+
+
+class Catalyst(Base):
+    """upcoming / recent event extracted from a  sec filing by the llm"""
+    __tablename__ = "catalysts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] =mapped_column(String(10), index=True)
+    accession_number: Mapped[str] = mapped_column(
+        String(25), ForeignKey("sec_filings.accession_number", ondelete="CASCADE"), index=True
+    )
+    filing_url: Mapped[str] = mapped_column(String(500))
+    # pdufa / adcom / approval / crl / regulatory_submission / topline_readout / trial_start / other
+    event_type: Mapped[str] = mapped_column(String(30))
+    drug: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    indication: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    date_text: Mapped[str | None] = mapped_column(String(100), nullable=True)  # as written, e.g. "Q1 2027"
+    event_date: Mapped[date | None] = mapped_column(Date, nullable=True)  # first day of the period
+    date_precision: Mapped[str] = mapped_column(String(10))  # day / month / quarter / half / year / none
+    summary: Mapped[str]=mapped_column(Text)
+    source_quote: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
 
 class CacheEntry(Base):

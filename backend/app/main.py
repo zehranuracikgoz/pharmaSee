@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, engine
 from app.models import models  # noqa: F401 — registers tables on Base.metadata
-from app.routers import fda, stocks, analysis
+from app.routers import fda, stocks, analysis, sec, catalysts
 from app.services.fda_service import run_scheduled_sync
 
 # uvicorn only configures its own loggers; without this, app INFO logs are dropped
@@ -64,6 +64,8 @@ app.include_router(fda.router)
 app.include_router(stocks.router)
 app.include_router(stocks.companies_router)
 app.include_router(analysis.router)
+app.include_router(sec.router)
+app.include_router(catalysts.router)
 
 
 @app.get("/", tags=["Health"])

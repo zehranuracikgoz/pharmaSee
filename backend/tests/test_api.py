@@ -5,6 +5,9 @@ from httpx import AsyncClient, ASGITransport
 # db and external APIs are set up offline in conftest.py
 from app.main import app
 from app.database import init_db
+from tests.conftest import TEST_ADMIN_TOKEN
+
+ADMIN = {"X-Admin-Token": TEST_ADMIN_TOKEN}
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -36,15 +39,32 @@ async def test_health(client: AsyncClient):
 # FDA
 @pytest.mark.asyncio
 async def test_fda_sync(client: AsyncClient):
-    resp = await client.post("/fda/sync")
+    # also the "right admin token" case
+    resp = await client.post("/fda/sync", headers=ADMIN)
     assert resp.status_code==200
     assert resp.json()["status"] == "ok"
+
+
+ADMIN_ENDPOINTS = ["/fda/sync", "/sec/sync", "/sec/extract"]
+
+
+@pytest.mark.asyncio
+async def test_admin_endpoints_reject_missing_token(client: AsyncClient):
+    for url in ADMIN_ENDPOINTS:
+        assert (await client.post(url)).status_code == 401, url
+
+
+@pytest.mark.asyncio
+async def test_admin_endpoints_reject_wrong_token(client: AsyncClient):
+    for url in ADMIN_ENDPOINTS:
+        resp = await client.post(url, headers={"X-Admin-Token": "wrong-token"})
+        assert resp.status_code == 401, url
 
 
 # stocks
 @pytest.mark.asyncio
 async def test_stock_info_known_ticker(client: AsyncClient):
-    await client.post("/fda/sync")
+    await client.post("/fda/sync", headers=ADMIN)
     resp = await client.get("/stocks/MRNA/info")
     assert resp.status_code == 200
     data = resp.json()
@@ -89,7 +109,7 @@ async def test_stock_info_falls_back_to_fast_info(client: AsyncClient, monkeypat
 
     from tests.conftest import FAST_INFO_MARKET_CAP
 
-    await client.post("/fda/sync")
+    await client.post("/fda/sync", headers=ADMIN)
     await _reset_company("VRTX")
     monkeypatch.setattr(yfinance, "Ticker", _blocked_info_ticker(FAST_INFO_MARKET_CAP))
 
@@ -106,7 +126,7 @@ async def test_failed_stock_info_is_not_stored(client: AsyncClient, monkeypatch)
 
     from tests.conftest import FakeTicker
 
-    await client.post("/fda/sync")
+    await client.post("/fda/sync", headers=ADMIN)
     await _reset_company("GILD")
 
     #.info blocked and fast_info empty: nothing usable, nothing stored
@@ -125,7 +145,7 @@ async def test_failed_stock_info_is_not_stored(client: AsyncClient, monkeypatch)
 @pytest.mark.asyncio
 async def test_stock_history_returns_valid_structure(client: AsyncClient):
     # prices can be empty in sandbox, just check the shape
-    await client.post("/fda/sync")
+    await client.post("/fda/sync", headers=ADMIN)
     resp = await client.get("/stocks/MRNA/history?period_days=7")
     assert resp.status_code==200
     data = resp.json()
@@ -135,7 +155,7 @@ async def test_stock_history_returns_valid_structure(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_search_companies(client: AsyncClient):
-    await client.post("/fda/sync")
+    await client.post("/fda/sync", headers=ADMIN)
     resp = await client.get("/stocks/search?q=moderna")
     assert resp.status_code == 200
     data = resp.json()
@@ -274,7 +294,7 @@ async def test_co_marketed_application_kept_for_each_company(client: AsyncClient
 # mocked data flows through the app (not just the response shape)
 @pytest.mark.asyncio
 async def test_stock_history_returns_mocked_prices(client: AsyncClient):
-    await client.post("/fda/sync")
+    await client.post("/fda/sync", headers=ADMIN)
     resp = await client.get("/stocks/PFE/history?period_days=30")
     assert resp.status_code == 200
     prices = resp.json()["prices"]
@@ -284,7 +304,7 @@ async def test_stock_history_returns_mocked_prices(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_fda_approvals_from_mocked_openfda(client: AsyncClient):
-    await client.post("/fda/sync")
+    await client.post("/fda/sync", headers=ADMIN)
     resp = await client.get("/fda/REGN/approvals")
     assert resp.status_code == 200
     approvals = resp.json()
@@ -342,7 +362,7 @@ async def test_market_cap_refresh_isolates_failures(client: AsyncClient, monkeyp
                 raise RuntimeError("yahoo down")
             return super().get_info()
 
-    await client.post("/fda/sync")
+    await client.post("/fda/sync", headers=ADMIN)
     async with AsyncSessionLocal() as db:
         for company in await db.scalars(select(Company)):
             company.market_cap = 1.0  # stale value
@@ -357,6 +377,193 @@ async def test_market_cap_refresh_isolates_failures(client: AsyncClient, monkeyp
         caps = {c.ticker: c.market_cap for c in await db.scalars(select(Company))}
     assert caps["PFE"] == 1.0  # nothing came back: stored value kept
     assert all(caps[t] == 50_000_000_000 for t in settings.TRACKED_TICKERS if t != "PFE")
+
+
+# sec filings
+@pytest.mark.asyncio
+async def test_sec_sync_filters_prefers_ex991_and_skips_stored(client: AsyncClient):
+    from sqlalchemy import delete, select
+
+    from app.database import AsyncSessionLocal
+    from app.models.models import Catalyst, SecFiling
+    from tests.conftest import SEC_REQUESTS
+
+    async with AsyncSessionLocal() as db:  # the scheduled sync test may have stored some
+        await db.execute(delete(Catalyst))
+        await db.execute(delete(SecFiling))
+        await db.commit()
+
+    resp = await client.post("/sec/sync", headers=ADMIN)
+    assert resp.status_code == 200
+    assert resp.json()["stored"] == 2
+
+    async with AsyncSessionLocal() as db:
+        rows = {r.ticker: r for r in await db.scalars(select(SecFiling))}
+    # filters:only the 7.01 8-K and the 6-K (2.02 8-K, 10-Q and old 8-K dropped)
+    assert {t: r.form for t, r in rows.items()} == {"MRNA": "8-K", "BNTX": "6-K"}
+    # EX-99.1 preferred over the 8-K cover document; hidden xbrl and styles stripped
+    mrna = rows["MRNA"]
+    assert mrna.url.endswith("/ex99-1.htm") and mrna.items == "7.01,9.01"
+    assert mrna.text == "Moderna announces FDA PDUFA date of December 1."
+    # no exhibit: the 6-K's primary document is used
+    assert rows["BNTX"].url.endswith("/form6-k.htm") and rows["BNTX"].processed is False
+
+    # re-run: nothing new stored, no filing index or document downloaded again
+    seen = len(SEC_REQUESTS)
+    resp=await client.post("/sec/sync", headers=ADMIN)
+    assert resp.json()["stored"] == 0 and resp.json()["already_stored"] == 2
+    assert not [u for u in SEC_REQUESTS[seen:] if "/Archives/" in u]
+    async with AsyncSessionLocal() as db:
+        assert len((await db.scalars(select(SecFiling))).all()) == 2
+
+
+# catalyst extraction
+async def _reset_filings(*filings: tuple):
+    """replace stored filings with (accession, text[, filed_date]) rows for MRNA"""
+    from datetime import date
+
+    from sqlalchemy import delete
+
+    from app.database import AsyncSessionLocal
+    from app.models.models import Catalyst, SecFiling
+
+    async with AsyncSessionLocal() as db:
+        await  db.execute(delete(Catalyst))
+        await db.execute(delete(SecFiling))
+        for accession, text, *filed in filings:
+            db.add(SecFiling(accession_number=accession, ticker="MRNA", form="8-K", items="8.01",
+                             filed_date=filed[0] if filed else date(2026, 9, 1),
+                             url= f"https://sec.test/{accession}", text=text))
+        await db.commit()
+
+
+async def _filing_states() -> dict[str, bool]:
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models.models import SecFiling
+
+    async with AsyncSessionLocal() as db:
+        return {f.accession_number: f.processed for f in await db.scalars(select(SecFiling))}
+
+
+@pytest.mark.asyncio
+async def test_prefilter_skips_filing_without_calling_llm(client: AsyncClient):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_CALLS
+
+    await _reset_filings(("acc-plain", "The board declared a quarterly dividend."))
+    summary= await process_pending_filings()
+
+    assert summary["prefiltered"] == 1 and summary["llm_calls"] == 0
+    assert GEMINI_CALLS == []
+    assert await _filing_states() == {"acc-plain": True}
+
+
+@pytest.mark.asyncio
+async def test_catalyst_with_quote_not_in_filing_is_dropped(client: AsyncClient):
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models.models import Catalyst
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE
+
+    text = "Moderna said the FDA set a PDUFA date of March 15, 2027 for mRNA-1010.\nOther news."
+    await _reset_filings(("acc-pdufa", text))
+    base = {"indication": "flu", "date_precision": "day", "summary": "PDUFA date set."}
+    GEMINI_QUEUE.append([
+        #a line break inside the quote still matches the stored text after normalization
+        {**base, "event_type": "pdufa", "drug": "mRNA-1010", "date_text": "March 15, 2027",
+         "event_date": "2027-03-15",
+         "source_quote": "Moderna said the FDA set a PDUFA date of March 15,\n2027 for mRNA-1010."},
+        {**base, "event_type": "approval", "drug": "mRNA-9999", "date_text": None, "event_date": None,
+         "source_quote": "The FDA approved mRNA-9999 yesterday."},  # not in the filing
+    ])
+
+    summary = await process_pending_filings()
+    assert summary["catalysts"] == 1 and summary["quotes_dropped"] == 1
+    async with AsyncSessionLocal() as db:
+        rows =(await db.scalars(select(Catalyst))).all()
+    assert [(r.drug, r.event_type, str(r.event_date)) for r in rows] == [("mRNA-1010", "pdufa", "2027-03-15")]
+    assert await _filing_states() == {"acc-pdufa": True}
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_leaves_remaining_filings_unprocessed(client: AsyncClient):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_CALLS, GEMINI_QUEUE
+
+    await _reset_filings(
+        ("acc-1", "Topline Phase 3 data expected in Q1 2027."),
+        ("acc-2", "The FDA accepted the BLA for priority review."),
+        ("acc-3", "Pivotal trial enrollment completed ahead of a data readout."),
+    )
+    GEMINI_QUEUE.append(429)
+
+    summary =  await process_pending_filings()
+    assert summary["rate_limited"] and summary["processed"] == 0
+    assert len(GEMINI_CALLS) == 1  # stopped after the first 429
+    assert await _filing_states() == {"acc-1": False, "acc-2": False, "acc-3": False}
+
+
+def test_default_gemini_model_is_flash_lite():
+    from app.config import Settings
+
+    assert Settings.model_fields["GEMINI_MODEL"].default == "gemini-3.5-flash-lite"
+
+
+async def  _stored_catalysts():
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models.models import Catalyst
+
+    async with AsyncSessionLocal() as db:
+        return (await db.scalars(select(Catalyst))).all()
+
+
+@pytest.mark.asyncio
+async def test_undated_approval_gets_filing_date(client: AsyncClient):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE
+
+    await _reset_filings(("acc-approved", "The FDA approved Fluvax for seasonal influenza."))
+    GEMINI_QUEUE.append([{
+        "event_type": "approval", "drug": "Fluvax", "indication": "influenza", "date_text": None,
+        "event_date": None, "date_precision": "none", "summary": "FDA approved Fluvax.",
+        "source_quote": "The FDA approved Fluvax for seasonal influenza.",
+    }])
+
+    await process_pending_filings()
+    [row]= await _stored_catalysts()
+    assert (str(row.event_date), row.date_precision, row.date_text) == (
+        "2026-09-01", "day", "Announced September 1, 2026"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dedupe_uses_normalized_drug_name(client: AsyncClient):
+    from datetime import date
+
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE
+
+    new_text = "Phase 3 data for Trastuzumab Pamirtecan expected in Q4 2026."
+    old_text ="Update: Phase 3 data for trastuzumab pamirtecan (BNT323/DB-1303) are expected in Q4 2026."
+    # shortest first: the newer filing is processed before the older one
+    await _reset_filings(("acc-new", new_text, date(2026, 9, 20)), ("acc-old", old_text, date(2026, 8, 1)))
+    base = {"event_type": "topline_readout", "indication": "breast cancer", "date_text": "Q4 2026",
+            "event_date": "2026-10-01", "date_precision": "quarter", "summary": "Phase 3 data in Q4."}
+    GEMINI_QUEUE.extend([
+        [{**base, "drug": "Trastuzumab Pamirtecan", "source_quote": new_text}],
+        [{**base, "drug": "trastuzumab  pamirtecan (BNT323/DB-1303)", "source_quote": old_text}],
+    ])
+
+    await process_pending_filings()
+    rows = await _stored_catalysts ()
+    # one row, from the newer filing, with its name as written
+    assert [(r.accession_number, r.drug) for r in rows] == [("acc-new", "Trastuzumab Pamirtecan")]
 
 
 # cache

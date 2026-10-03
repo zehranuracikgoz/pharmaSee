@@ -16,6 +16,19 @@ class Settings(BaseSettings):
 
     ALPHA_VANTAGE_KEY: str=""  # fallback if yfinance is down
 
+    # required in the X-Admin-Token header of the manual sync endpoints; empty disables them
+    ADMIN_TOKEN: str = ""
+
+    # sec asks for a contact email in the user-agent of every request
+    SEC_CONTACT_EMAIL: str = ""
+
+    # catalyst extraction from sec filings; empty key skips the step
+    GEMINI_API_KEY: str = ""
+    # free tier; gemini-3.8-flash was often overloaded (503) and allows only 20 requests/day
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    # 13s between calls stays under a 5 requests/min free-tier limit (what 3.8-flash reported, oct 2026)
+    GEMINI_MIN_INTERVAL_SECONDS: float = 13
+
     # tracked companies — single source of truth; the frontend reads it via GET /companies
     # the name (first word) is also used for OpenFDA /ClinicalTrials searches
     TRACKED_TICKERS: dict[str, str] = {
