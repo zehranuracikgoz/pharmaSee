@@ -262,12 +262,12 @@ function CatalystsInner() {
           </section>
 
           <section className="space-y-4">
-            < h2 className="flex items-center gap-2 text-sm font-semibold text-muted uppercase tracking-wide">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted uppercase tracking-wide">
               <History className="h-4 w-4 text-accent" />
               Recent
               <span className="normal-case font-normal">· last {RECENT_DAYS} days</span>
               {!loading && <span className="font-mono normal-case text-text">{recent.length}</span>}
-            </>
+            </h2>
             {loading ? (
               <CardsSkeleton count={3} />
             ) : recent.length === 0 ? (
