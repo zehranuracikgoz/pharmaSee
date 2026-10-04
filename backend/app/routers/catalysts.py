@@ -20,6 +20,7 @@ async def list_catalysts(
     ),
     ticker: str | None = Query(default=None, description="Filter by ticker"),
     event_type: str | None = Query(default=None, description=f"One of: {', '.join(EVENT_TYPES)}"),
+    min_votes: int | None = Query(default=None, ge=1, description="Only events found by at least N models"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -27,12 +28,15 @@ async def list_catalysts(
     upcoming=true keeps events whose period hasn't ended: "Q4 2026" is stored as
     2026-10-01 but still counts as upcoming until December 31.
     past_days=N returns events that already ended in the last N days, newest first.
+    votes / models_total: how many AI models found the event, out of those that read the filing.
     """
     stmt = select(Catalyst)
     if ticker:
         stmt =stmt.where(Catalyst.ticker == ticker.upper())
     if event_type:
         stmt = stmt.where(Catalyst.event_type == event_type)
+    if min_votes:
+        stmt = stmt.where(Catalyst.votes >= min_votes)
     rows = (await db.scalars(stmt)).all()
 
     today = date.today()

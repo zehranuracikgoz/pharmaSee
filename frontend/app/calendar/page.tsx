@@ -80,6 +80,24 @@ function capitalize(text: string) {
   return firstWord === firstWord.toLowerCase() ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 
+// every model that read the filing found it; 1/1 counts as agreed too
+const isAgreed = (c: Catalyst) => c.votes >= c.models_total;
+
+function VotesBadge({ c }: { c: Catalyst }) {
+  if (c.models_total <= 1) return null;
+  const agreed = isAgreed(c);
+  return (
+    <span
+      title={`Found by: ${c.agreed_by.split(",").join(", ")}`}
+      className={`text-xs font-medium px-2 py-0.5 rounded-full ring-1 cursor-help ${
+        agreed ? "bg-success/15 text-success ring-success/30" : "bg-warning/15 text-warning ring-warning/30"
+      }`}
+    >
+      {c.votes}/{c.models_total} models{!agreed && " · Low confidence"}
+    </span>
+  );
+}
+
 function CatalystCard({ c }: { c: Catalyst }) {
   const meta =EVENT_META[c.event_type] ?? EVENT_META.other;
   return (
@@ -91,6 +109,7 @@ function CatalystCard({ c }: { c: Catalyst }) {
         <span className= {`text-xs font-medium px-2 py-0.5 rounded-full ring-1 ${meta.chip}`}>
           {meta.label}
         </span>
+        <VotesBadge c={c} />
         {c.date_text && <span className="ml-auto text-xs font-mono text-muted">{c.date_text}</span>}
       </div>
 
@@ -151,6 +170,7 @@ function CatalystsInner() {
   const params = useSearchParams();
   const ticker = params?.get("ticker")?.toUpperCase() || "";
   const eventType = params?.get("type") || "";
+  const hideLow = params?.get("hide_low") === "1";
 
   const [companies, setCompanies] = useState<TrackedCompany[]>([]);
   const [upcoming, setUpcoming] = useState<Catalyst[]>([]);
@@ -183,7 +203,7 @@ function CatalystsInner() {
     };
   }, [ticker, eventType]);
 
-  const setFilter = (key: "ticker" | "type", value: string) => {
+  const setFilter = (key: "ticker" | "type" | "hide_low", value: string) => {
     const next = new URLSearchParams(params?.toString());
     if (value) next.set(key, value);
     else next.delete(key);
@@ -191,8 +211,11 @@ function CatalystsInner() {
     router.replace(`/calendar${qs ? `?${qs}` : ""}`, { scroll: false });
   };
 
-  const filtered = Boolean(ticker || eventType);
-  const groups = groupByPeriod(upcoming);
+  const filtered = Boolean(ticker || eventType || hideLow);
+  // client-side: "all models agreed" depends on models_total, which differs per filing
+  const shownUpcoming = hideLow ? upcoming.filter(isAgreed) : upcoming;
+  const shownRecent = hideLow ? recent.filter(isAgreed) : recent;
+  const groups = groupByPeriod(shownUpcoming);
 
   return (
     <div className="space-y-8">
@@ -233,6 +256,15 @@ function CatalystsInner() {
               ))}
             </select>
           </div>
+          <label className="flex items-center gap-2 py-2 text-sm text-text cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={hideLow}
+              onChange={(e) => setFilter("hide_low", e.target.checked ? "1" : "")}
+              className="h-4 w-4 accent-accent cursor-pointer"
+            />
+            Hide low confidence
+          </label>
         </div>
       </div>
 
@@ -247,7 +279,7 @@ function CatalystsInner() {
             <h2 className="flex items-center gap-2 text-sm font-semibold text-muted uppercase tracking-wide">
               <CalendarDays className="h-4 w-4 text-accent" />
               Upcoming
-              {!loading && <span className="font-mono normal-case text-text">{upcoming.length}</span>}
+              {!loading && <span className="font-mono normal-case text-text">{shownUpcoming.length}</span>}
             </h2>
             {loading ? (
               <CardsSkeleton count={6} />
@@ -275,11 +307,11 @@ function CatalystsInner() {
               <History className="h-4 w-4 text-accent" />
               Recent
               <span className="normal-case font-normal">· last {RECENT_DAYS} days</span>
-              {!loading && <span className="font-mono normal-case text-text">{recent.length}</span>}
+              {!loading && <span className="font-mono normal-case text-text">{shownRecent.length}</span>}
             </h2>
             {loading ? (
               <CardsSkeleton count={3} />
-            ) : recent.length === 0 ? (
+            ) : shownRecent.length === 0 ? (
               <EmptySection
                 text={filtered
                   ? `No catalysts in the last ${RECENT_DAYS} days match these filters.`
@@ -287,7 +319,7 @@ function CatalystsInner() {
               />
             ) : (
               <div className= "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {recent.map((c) => <CatalystCard key={c.id} c={c} />)}
+                {shownRecent.map((c) => <CatalystCard key={c.id} c={c} />)}
               </div>
             )}
           </section>
@@ -295,8 +327,9 @@ function CatalystsInner() {
       )}
 
       <p className="text-xs text-muted border-t border-border pt-4">
-        Extracted automatically from SEC 8-K/6-K filings with Gemini. Every item links to its
-        source; verify before relying on it.
+        Events are extracted independently from SEC 8-K/6-K filings by AI models from different
+        providers; the badge shows how many of them agreed. Every item links to its source; verify
+        before relying on it.
       </p>
     </div>
   );

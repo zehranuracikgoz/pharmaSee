@@ -122,6 +122,9 @@ class CatalystOut(BaseModel):
     source_quote: str
     filing_url: str
     accession_number: str
+    votes: int
+    models_total: int
+    agreed_by: str
 
     model_config = {"from_attributes": True}
 

@@ -84,6 +84,10 @@ class Catalyst(Base):
     date_precision: Mapped[str] = mapped_column(String(10))  # day / month / quarter / half / year / none
     summary: Mapped[str]=mapped_column(Text)
     source_quote: Mapped[str] = mapped_column(Text)
+    # cross-model voting: how many providers found it, out of those that read the filing
+    votes: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    models_total: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    agreed_by: Mapped[str] = mapped_column(String(100), default="gemini", server_default="gemini")  # comma-separated provider names
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
 

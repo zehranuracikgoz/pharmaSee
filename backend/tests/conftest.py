@@ -2,9 +2,11 @@
 test setup: sqlite db + offline fakes for yfinance, openfda, clinicaltrials.gov
 and sec edgar — suite never touches the network.
 """
+import atexit
 import copy
 import json
 import os
+import shutil
 import tempfile
 import zlib
 from pathlib import Path
@@ -12,6 +14,7 @@ from pathlib import Path
 # must run before any `app` import — settings are read at import time.
 # fresh db per run so cached data never bleeds across runs.
 _TEST_DB = Path(tempfile.mkdtemp(prefix="pharmasee-tests-")) / "test.db"
+atexit.register(shutil.rmtree, _TEST_DB.parent, ignore_errors=True)  # don't leave a folder per run
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB.as_posix()}"
 # never send the real contact email / api key; also lets ci run without a .env
 os.environ["SEC_CONTACT_EMAIL"] = "tests@example.com"
@@ -261,6 +264,25 @@ def _fake_gemini(url: str, body: dict) -> httpx.Response:
     return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": text}]}}]}, request=request)
 
 
+# ── second voter: a fake openai-compatible provider that voting tests add to PROVIDERS.
+# same queue format as gemini, plus a str for a raw (e.g. invalid json) reply
+
+SECOND_LLM_HOST = "second-llm.test"
+SECOND_QUEUE: list = []
+SECOND_CALLS: list[dict] = []
+
+
+def _fake_openai_compatible(url: str, body: dict) -> httpx.Response:
+    SECOND_CALLS.append(body)
+    request = httpx.Request("POST", url)
+    reply = SECOND_QUEUE.pop(0) if SECOND_QUEUE else []
+    if isinstance(reply, int):
+        return httpx.Response(reply, json={"error": {"message": "fake", "type": "fake"}}, request=request)
+    content = reply if isinstance(reply, str) else json.dumps({"catalysts": reply})
+    return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": content}}]},
+                          request=request)
+
+
 def _json_response(payload):
     return lambda url, params: httpx.Response(200, json=payload(params), request=httpx.Request("GET", url))
 
@@ -292,6 +314,8 @@ async def _fake_async_post(self, url, *args, **kwargs):
     host = urlparse(str(url)).hostname
     if host == "generativelanguage.googleapis.com":
         return _fake_gemini(str(url), kwargs.get("json") or {})
+    if host == SECOND_LLM_HOST:
+        return _fake_openai_compatible(str(url), kwargs.get("json") or {})
     if host is None or host == "test":
         return await _real_async_post(self, url, *args, **kwargs)
     raise RuntimeError(f"unexpected network call in tests: POST {url}")
@@ -304,4 +328,6 @@ def offline_apis(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "post", _fake_async_post)
     GEMINI_QUEUE.clear()
     GEMINI_CALLS.clear()
+    SECOND_QUEUE.clear()
+    SECOND_CALLS.clear()
     yield

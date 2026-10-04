@@ -627,6 +627,93 @@ async def test_dedupe_uses_normalized_drug_name(client: AsyncClient):
     assert [(r.accession_number, r.drug) for r in rows] == [("acc-new", "Trastuzumab Pamirtecan")]
 
 
+# cross-model voting
+VOTE_TEXT = "The FDA set a PDUFA date of March 15, 2027 for mRNA-1010. Phase 3 data for mRNA-1083 are expected in Q1 2027."
+PDUFA_1010 = {"event_type": "pdufa", "drug": "mRNA-1010", "indication": "flu", "date_text": "March 15, 2027",
+              "event_date": "2027-03-15", "date_precision": "day", "summary": "PDUFA date set.",
+              "source_quote": "The FDA set a PDUFA date of March 15, 2027 for mRNA-1010."}
+
+
+@pytest.fixture
+def two_models(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services import llm_service
+    from tests.conftest import SECOND_LLM_HOST
+
+    # duck-typed provider: only gemini is registered in the app
+    second = SimpleNamespace(name="second", kind="openai", key_setting="SECOND_API_KEY", api_key="test-key",
+                             model="test-model", min_interval=0, base_url=f"https://{SECOND_LLM_HOST}/v1")
+    monkeypatch.setattr(llm_service, "PROVIDERS", [*llm_service.PROVIDERS, second])
+
+
+def _votes(rows):
+    return sorted((r.drug, r.votes, r.models_total, r.agreed_by) for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_models_agree_one_row_two_votes(client: AsyncClient, two_models):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE, SECOND_QUEUE
+
+    await _reset_filings(("acc-vote", VOTE_TEXT))
+    GEMINI_QUEUE.append([PDUFA_1010])
+    # the second model names it differently: one name contains the other, still the same event
+    SECOND_QUEUE.append([{**PDUFA_1010, "drug": "mRNA-1010 influenza vaccine", "summary": "Second model wording."}])
+
+    summary = await process_pending_filings()
+    rows = await _stored_catalysts()
+    assert _votes(rows) == [("mRNA-1010", 2, 2, "gemini,second")]
+    assert rows[0].summary == "PDUFA date set."  # gemini's text is kept
+    assert summary["calls"] == {"gemini": 1, "second": 1} and summary["full_agreement"] == 1
+
+
+@pytest.mark.asyncio
+async def test_models_disagree_two_rows_one_vote_each(client: AsyncClient, two_models):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE, SECOND_QUEUE
+
+    await _reset_filings(("acc-vote", VOTE_TEXT))
+    GEMINI_QUEUE.append([PDUFA_1010])
+    SECOND_QUEUE.append([{
+        "event_type": "topline_readout", "drug": "mRNA-1083", "indication": "flu/covid", "date_text": "Q1 2027",
+        "event_date": "2027-01-01", "date_precision": "quarter", "summary": "Phase 3 data in Q1 2027.",
+        "source_quote": "Phase 3 data for mRNA-1083 are expected in Q1 2027.",
+    }])
+
+    summary = await process_pending_filings()
+    assert _votes(await _stored_catalysts()) == [("mRNA-1010", 1, 2, "gemini"), ("mRNA-1083", 1, 2, "second")]
+    assert summary["partial_agreement"] == 2
+
+
+@pytest.mark.asyncio
+async def test_gemini_only_works_as_before(client: AsyncClient):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE, SECOND_CALLS
+
+    await _reset_filings(("acc-vote", VOTE_TEXT))
+    GEMINI_QUEUE.append([PDUFA_1010])
+
+    summary = await process_pending_filings()
+    assert _votes(await _stored_catalysts()) == [("mRNA-1010", 1, 1, "gemini")]
+    assert SECOND_CALLS == [] and summary["calls"] == {"gemini": 1}
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_from_one_model_still_saves_filing(client: AsyncClient, two_models):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE, SECOND_QUEUE
+
+    await _reset_filings(("acc-vote", VOTE_TEXT))
+    GEMINI_QUEUE.append([PDUFA_1010])
+    SECOND_QUEUE.append('{"catalysts": [{"event_type": "pdufa"')  # cut off mid-reply
+
+    summary = await process_pending_filings()
+    assert _votes(await _stored_catalysts()) == [("mRNA-1010", 1, 1, "gemini")]
+    assert summary["provider_errors"] == {"gemini": 0, "second": 1}
+    assert await _filing_states() == {"acc-vote": True}
+
+
 # cache
 @pytest.mark.asyncio
 async def test_cache_hit_faster_than_miss(client: AsyncClient):

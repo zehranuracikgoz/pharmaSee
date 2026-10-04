@@ -1,6 +1,7 @@
 """
 catalyst extraction: stored SEC filings → llm → catalysts table.
-cheap keyword prefilter first; only matching filings are sent to the llm.
+cheap keyword prefilter first; only matching filings are sent to the llms.
+every enabled provider reads each filing; how many agree is stored as votes / models_total.
 """
 import asyncio
 import logging
@@ -11,10 +12,17 @@ from datetime import date, timedelta
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.models import Catalyst, SecFiling
-from app.services.llm_service import LLMError, LLMOverloadedError, LLMRateLimitError, generate_json
+from app.services.llm_service import (
+    LLMError,
+    LLMOverloadedError,
+    LLMRateLimitError,
+    Provider,
+    enabled_providers,
+    generate_json,
+    missing_key_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,12 +165,42 @@ def _clean_catalysts(raw: dict, filing: SecFiling) -> tuple[list[dict], int]:
     return kept, dropped
 
 
-async def _save_catalysts(db: AsyncSession, filing: SecFiling, catalysts: list[dict]) -> int:
+def _same_drug(a: str | None, b: str | None) -> bool:
+    # equal after normalization, or one name contains the other ("lonvo-z" vs "lonvo-z (NTLA-2002)")
+    x, y = normalize_drug(a), normalize_drug(b)
+    if not x or not y:
+        return x == y
+    return x == y or f" {x} " in f" {y} " or f" {y} " in f" {x} "
+
+
+def _same_event(a: dict, b: dict) -> bool:
+    return (a["event_type"] == b["event_type"] and a["event_date"] == b["event_date"]
+            and _same_drug(a["drug"], b["drug"]))
+
+
+def vote(read_by: dict[str, list[dict]]) -> list[dict]:
+    """
+    merge each provider's validated catalysts for one filing into one catalyst per event.
+    read_by: provider name -> catalysts, in PROVIDERS order; the first provider's wording is kept.
+    """
+    groups: list[tuple[dict, list[str]]] = []
+    for name, catalysts in read_by.items():
+        for c in catalysts:
+            match = next((g for g in groups if _same_event(g[0], c)), None)
+            if match is None:
+                groups.append((c, [name]))
+            elif name not in match[1]:
+                match[1].append(name)
+    return [{**c, "votes": len(names), "models_total": len(read_by), "agreed_by": ",".join(names)}
+            for c, names in groups]
+
+
+async def _save_catalysts(db: AsyncSession, filing: SecFiling, catalysts: list[dict]) -> list[dict]:
     """
     add catalysts for one filing. same ticker + normalized drug + event_type + event_date
-    already stored: the one from the newer filing wins. returns how many were added.
+    already stored: the one from the newer filing wins. returns the added catalysts.
     """
-    added = 0
+    added = []
     seen = set()
     for c in catalysts:
         drug_key = normalize_drug(c["drug"])
@@ -188,7 +226,7 @@ async def _save_catalysts(db: AsyncSession, filing: SecFiling, catalysts: list[d
 
         db.add(Catalyst(ticker=filing.ticker, accession_number=filing.accession_number,
                         filing_url=filing.url, **c))
-        added += 1
+        added.append(c)
     return added
 
 
@@ -199,18 +237,33 @@ def _prompt(filing: SecFiling) -> str:
     )
 
 
+async def _call(provider: Provider, filing: SecFiling, last_call: dict[str, float]) -> dict:
+    # each provider has its own free-tier requests-per-minute limit
+    wait = last_call.get(provider.name, 0.0) + provider.min_interval - time.monotonic()
+    if wait > 0:
+        await asyncio.sleep(wait)
+    last_call[provider.name] = time.monotonic()
+    return await generate_json(SYSTEM_PROMPT, _prompt(filing), CATALYST_SCHEMA, provider=provider.name)
+
+
 async def process_pending_filings(db: AsyncSession | None = None) -> dict:
-    """extract catalysts from up to MAX_FILINGS_PER_RUN unprocessed filings, shortest first"""
+    """
+    extract catalysts from up to MAX_FILINGS_PER_RUN unprocessed filings, shortest first.
+    every enabled provider reads every filing; a 429 or repeated 503s from any of them stops
+    the run, so each processed filing was read by all providers that could read it.
+    """
     if db is None:
         async with AsyncSessionLocal() as session:
             return await process_pending_filings(session)
 
+    providers = enabled_providers()
     summary={"processed": 0, "prefiltered": 0, "llm_calls": 0, "catalysts": 0,
                "quotes_dropped": 0, "failed": 0, "rate_limited": False, "overloaded": False,
-               "error": None}
-    if not settings.GEMINI_API_KEY:
-        logger.warning("catalyst extraction skipped: GEMINI_API_KEY is not set")
-        summary["error"] = "GEMINI_API_KEY is not set"
+               "calls": {p.name: 0 for p in providers}, "provider_errors": {p.name: 0 for p in providers},
+               "full_agreement": 0, "partial_agreement": 0, "error": None}
+    if not providers:
+        logger.warning("catalyst extraction skipped: no llm api key is set")
+        summary["error"] = missing_key_message()
         return summary
     if is_running():
         summary["error"] = "extraction is already running"
@@ -223,8 +276,8 @@ async def process_pending_filings(db: AsyncSession | None = None) -> dict:
             .limit(MAX_FILINGS_PER_RUN)
         )).all()
 
-        last_call = 0.0
-        overloaded_in_a_row = 0
+        last_call: dict[str, float] = {}
+        overloaded_in_a_row = {p.name: 0 for p in providers}
         for filing in filings:
             if not mentions_catalyst(filing.text):
                 filing.processed = True
@@ -232,59 +285,73 @@ async def process_pending_filings(db: AsyncSession | None = None) -> dict:
                 summary["prefiltered"] +=  1
                 continue
 
-            # stay under the free-tier requests-per-minute limit
-            wait = last_call + settings.GEMINI_MIN_INTERVAL_SECONDS - time.monotonic()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            last_call = time.monotonic()
+            results = await asyncio.gather(*(_call(p, filing, last_call) for p in providers),
+                                           return_exceptions=True)
+            summary["llm_calls"] += len(providers)
+            stop = None
+            read_by: dict[str, list[dict]] = {}
+            for p, result in zip(providers, results):
+                summary["calls"][p.name] += 1
+                if isinstance(result, LLMRateLimitError):
+                    summary["rate_limited"] = True
+                    stop = f"{p.name} rate limit: {result}"
+                elif isinstance(result, LLMOverloadedError):
+                    summary["provider_errors"][p.name] += 1
+                    overloaded_in_a_row[p.name] += 1
+               # 503s still use up the small free-tier daily quota: give up on a busy model
+                    if overloaded_in_a_row[p.name] >= MAX_OVERLOADED_IN_A_ROW:
+                        summary["overloaded"] = True
+                        stop = f"{p.name} overloaded {overloaded_in_a_row[p.name]} times in a row: {result}"
+                    else:
+                        logger.warning("%s overloaded for %s (%s), skipping it for this filing",
+                                       p.name, filing.accession_number, filing.ticker)
+                elif isinstance(result, LLMError):  #expected api errors: one line, no traceback
+                    summary["provider_errors"][p.name] += 1
+                    logger.warning("%s failed for %s (%s): %s", p.name, filing.accession_number, filing.ticker, result)
+                elif isinstance(result, BaseException):
+                    summary["provider_errors"][p.name] += 1
+                    logger.error("%s failed for %s (%s)", p.name, filing.accession_number, filing.ticker,
+                                 exc_info=result)
+                else:
+                    overloaded_in_a_row[p.name] = 0
+                    # every model's answer goes through the same checks on its own
+                    catalysts, dropped = _clean_catalysts(result, filing)
+                    summary["quotes_dropped"] += dropped
+                    read_by[p.name] = catalysts
 
+            if stop:
+                logger.warning("stopping catalyst extraction, the rest stays for the next run: %s", stop)
+                break
+            if not read_by:
+                summary["failed"] += 1  # no provider could read it: stays unprocessed
+                continue
             try:
-                summary["llm_calls"] += 1
-                raw = await generate_json(SYSTEM_PROMPT, _prompt(filing), CATALYST_SCHEMA)
-                catalysts, dropped = _clean_catalysts(raw, filing)
-                summary["quotes_dropped"] += dropped
-                summary["catalysts"] += await _save_catalysts(db, filing, catalysts)
+                added = await _save_catalysts(db, filing, vote(read_by))
                 filing.processed =  True  # only once its result is saved
                 await db.commit()
-                summary["processed"] += 1
-                overloaded_in_a_row = 0
-            except LLMRateLimitError as exc:
-                await db.rollback()
-                summary["rate_limited"] = True
-                logger.warning("gemini rate limit, stopping; the rest stays for the next run: %s", exc)
-                break
-            except LLMOverloadedError as exc:
-                await db.rollback()
-                summary["failed"] += 1
-                overloaded_in_a_row += 1
-           # 503s still use up the small free-tier daily quota: give up on a busy model
-                if overloaded_in_a_row >= MAX_OVERLOADED_IN_A_ROW:
-                    summary["overloaded"] = True
-                    logger.warning("gemini overloaded %d times in a row, stopping; the rest stays "
-                                   "for the next run: %s", overloaded_in_a_row, exc)
-                    break
-                logger.warning("gemini overloaded for %s (%s), skipping for now",
-                               filing.accession_number, filing.ticker)
-            except LLMError as exc:  #expected api errors: one line, no traceback
-                await db.rollback()
-                summary["failed"] += 1
-                logger.warning("catalyst extraction failed for %s (%s): %s",
-                               filing.accession_number, filing.ticker, exc)
             except Exception:
                 await db.rollback()
                 summary["failed"] += 1
-                logger.exception("catalyst extraction failed for %s (%s)", filing.accession_number, filing.ticker)
+                logger.exception("saving catalysts failed for %s (%s)", filing.accession_number, filing.ticker)
+                continue
+            summary["processed"] += 1
+            summary["catalysts"] += len(added)
+            full = sum(c["votes"] == c["models_total"] for c in added)
+            summary["full_agreement"] += full
+            summary["partial_agreement"] += len(added) - full
 
     logger.info(
-        "catalyst extraction done: %d processed, %d skipped by prefilter, %d llm calls, %d catalysts saved, "
-        "%d dropped (quote not in filing), %d failed%s",
-        summary["processed"], summary["prefiltered"], summary["llm_calls"], summary["catalysts"],
-        summary["quotes_dropped"], summary["failed"],
+        "catalyst extraction done: %d processed, %d skipped by prefilter, calls %s, %d catalysts saved "
+        "(%d full / %d partial agreement), %d dropped (quote not in filing), provider errors %s, "
+        "%d failed%s",
+        summary["processed"], summary["prefiltered"], summary["calls"], summary["catalysts"],
+        summary["full_agreement"], summary["partial_agreement"], summary["quotes_dropped"],
+        summary["provider_errors"], summary["failed"],
         ", stopped on rate limit" if summary["rate_limited"]
         else ", stopped: model overloaded" if summary["overloaded"] else "",
-
     )
     return summary
+
 
 def period_end(event_date: date | None, precision: str) -> date | None:
     """last day of the period an event_date stands for (event_date is its first day)"""

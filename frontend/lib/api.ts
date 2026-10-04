@@ -108,6 +108,9 @@ export interface Catalyst {
   source_quote: string;
   filing_url: string;
   accession_number: string;
+  votes: number; // models that found it
+  models_total: number; // models that read the filing
+  agreed_by: string; // comma-separated provider names, e.g. "gemini"
 }
 
 export interface CatalystQuery {
@@ -115,6 +118,7 @@ export interface CatalystQuery {
   pastDays?: number;
   ticker?: string;
   eventType?: string;
+  minVotes?: number;
 }
 
 export interface Quote {
@@ -177,8 +181,9 @@ export const api = {
     };
   },
 
-  catalysts: ({ upcoming, pastDays, ticker, eventType }: CatalystQuery = {}) => {
+  catalysts: ({ upcoming, pastDays, ticker, eventType, minVotes }: CatalystQuery = {}) => {
     const params = new URLSearchParams();
+    if (minVotes) params.set("min_votes", String(minVotes));
     if (upcoming) params.set("upcoming", "true");
     if (pastDays) params.set("past_days", String(pastDays));
     if (ticker) params.set("ticker", ticker);
