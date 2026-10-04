@@ -714,6 +714,64 @@ async def test_invalid_json_from_one_model_still_saves_filing(client: AsyncClien
     assert await _filing_states() == {"acc-vote": True}
 
 
+@pytest.mark.asyncio
+async def test_openfda_fetch_pages_through_all_results(monkeypatch):
+    from app.services import fda_service
+
+    def application(number):
+        return {"application_number": f"NDA{number}", "openfda": {"generic_name": [f"drug {number}"]},
+                "submissions": [{"submission_type": "ORIG", "submission_number": "1",
+                                 "submission_status": "AP", "submission_status_date": "20250101"}]}
+
+    pages, requests = [[application(1)], [application(2)]], []
+
+    async def fake_fetch(url, params, timeout=15.0):
+        requests.append((params["limit"], params["skip"]))
+        return {"meta": {"results": {"total": 2}}, "results": pages[params["skip"]]}
+
+    monkeypatch.setattr(fda_service, "_fetch_json", fake_fetch)
+    monkeypatch.setattr(fda_service, "OPENFDA_PAGE_SIZE", 1)
+    monkeypatch.setattr(fda_service, "OPENFDA_PAGE_DELAY", 0)
+
+    results = await fda_service.fetch_all_openfda('openfda.manufacturer_name:"test"')
+    assert requests == [(1, 0), (1, 1)]  # second page requested with skip, then stops at total
+    assert sorted(a["id"] for a in fda_service.parse_approvals("TEST", results)) == [
+        "TEST-NDA1-ORIG-1", "TEST-NDA2-ORIG-1"
+    ]
+
+
+# event study
+def test_event_study_ar_car_with_known_alpha_beta():
+    from datetime import date
+
+    import numpy as np
+    import pandas as pd
+
+    from analysis.event_study import WINDOW, abnormal_returns, closes, summarize
+
+    # market = the mocked yfinance series; the stock follows it exactly with a known alpha / beta
+    market = closes("MRNA", date(2025, 1, 1), date(2026, 6, 1))
+    alpha, beta, shock = 0.001, 1.5, 0.05
+    r_m = market.pct_change().fillna(0).to_numpy()
+    r_s = alpha + beta * r_m
+    day0 = 300
+    r_s[day0] += shock  # +5% abnormal return on day 0 only
+    stock = pd.Series(100 * np.cumprod(1 + r_s), index=market.index)
+
+    res = abnormal_returns(stock, market, market.index[day0])
+    assert res["alpha"] == pytest.approx(alpha, abs=1e-9) and res["beta"] == pytest.approx(beta, abs=1e-9)
+    expected_ar = np.zeros(2 * WINDOW + 1)
+    expected_ar[WINDOW] = shock
+    assert res["ar_mm"] == pytest.approx(expected_ar, abs=1e-9)
+    # market-adjusted (beta = 1) keeps the extra 0.5 * market move and alpha
+    assert res["ar_ma"][WINDOW] == pytest.approx(alpha + 0.5 * r_m[day0] + shock, abs=1e-9)
+
+    car = summarize(np.array([res["ar_mm"], res["ar_mm"]]))
+    assert car["car"]["mean"][WINDOW - 1] == pytest.approx(0, abs=1e-9)
+    assert car["car"]["mean"][-1] == pytest.approx(shock, abs=1e-9)
+    assert car["windows"]["CAR[0,+1]"]["mean"] == pytest.approx(shock, abs=1e-9)
+
+
 # cache
 @pytest.mark.asyncio
 async def test_cache_hit_faster_than_miss(client: AsyncClient):

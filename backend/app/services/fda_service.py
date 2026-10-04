@@ -4,6 +4,7 @@ OpenFDA API + ClinicalTrials.gov API integration
 OpenFDA  → https://api.fda.gov/drug/drugsfda.json
 ClinTrials → https://clinicaltrials.gov/api/v2/studies
 """
+import asyncio
 import logging
 from datetime import date, datetime, timedelta
 
@@ -34,8 +35,13 @@ CLINTRIALS_BASE = "https://clinicaltrials.gov/api/v2/studies"
 # one page only; companies with more active trials show as "100+" in the UI
 TRIALS_PAGE_SIZE = 100
 
-# v3: ids include the ticker; cached v2 lists hold ticker-less ids and must not be reused
-_APPROVALS_CACHE_KEY = "fda_approvals_v3"
+# v4: full paged results; cached v3 lists were cut off at 50 applications
+_APPROVALS_CACHE_KEY = "fda_approvals_v4"
+
+# openfda allows at most 1000 results per request and a skip of at most 25000
+OPENFDA_PAGE_SIZE = 1000
+OPENFDA_MAX_SKIP = 25000
+OPENFDA_PAGE_DELAY = 0.25  # seconds between pages
 
 
 async def _fetch_json(url: str, params: dict, timeout: float = 15.0) -> dict:
@@ -49,6 +55,25 @@ async def _fetch_json(url: str, params: dict, timeout: float = 15.0) -> dict:
             return {}
         resp.raise_for_status()
         return resp.json()
+
+
+async def fetch_all_openfda(search: str) -> list[dict]:
+    """every drugsfda result for a search, paged with skip"""
+    results: list[dict] = []
+    skip = 0
+    while True:
+        data = await _fetch_json(OPENFDA_BASE, {"search": search, "limit": OPENFDA_PAGE_SIZE, "skip": skip})
+        page = data.get("results", [])
+        results.extend(page)
+        total = data.get("meta", {}).get("results", {}).get("total", 0)
+        skip += len(page)
+        if not page or skip >= total:
+            return results
+        if skip > OPENFDA_MAX_SKIP:
+            logger.warning("OpenFDA search %s has %d results; stopped at the skip limit with %d",
+                           search, total, len(results))
+            return results
+        await asyncio.sleep(OPENFDA_PAGE_DELAY)
 
 
 def _is_meaningful_submission(sub: dict) -> bool:
@@ -111,6 +136,10 @@ async def sync_companies(db: AsyncSession) -> None:
             db.add(Company(ticker=ticker, name=name))
     await db.commit()
 
+def manufacturer_search(company_name: str) -> str:
+    return f'openfda.manufacturer_name:"{company_name.split()[0].lower()}"'
+
+
 async def fetch_fda_approvals_for_company(
     ticker:str, company_name: str, db: AsyncSession
 ) -> list[dict]:
@@ -125,21 +154,14 @@ async def fetch_fda_approvals_for_company(
     if cached is not None:
         return cached
 
-    search_term = company_name.split()[0].lower()
     try:
-        data = await _fetch_json(
-            OPENFDA_BASE,
-            {
-                "search": f'openfda.manufacturer_name:"{search_term}"',
-                "limit": 50,
-            },
-        )
+        results = await fetch_all_openfda(manufacturer_search(company_name))
     except (httpx.HTTPError, ValueError):
         # failed requests aren't cached; the next call retries
         logger.exception("OpenFDA request failed for %s", ticker)
         return []
 
-    approvals = parse_approvals(ticker, data.get("results", []))
+    approvals = parse_approvals(ticker, results)
     await set_cached(db, cache_key, params, approvals)
     return approvals
 
