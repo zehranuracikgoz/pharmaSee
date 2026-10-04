@@ -35,7 +35,7 @@ async def search(
     """Search the DB by ticker or company name."""
     companies = await search_companies(q, db)
     results = [
-        SearchResultItem(ticker=c.ticker, name=c.name, sector=c.sector)
+        SearchResultItem(ticker=c.ticker, name=c.name, industry=c.industry)
         for c in companies
     ]
     return SearchOut(results=results, query=q, total=len(results))
@@ -46,7 +46,7 @@ async def company_info(
     ticker: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return company name, sector and market cap."""
+    """Return company name, industry and market cap."""
     ticker = ticker.upper()
     company =await get_company_info(ticker, db)
     if not company:

@@ -47,6 +47,23 @@ class Settings(BaseSettings):
         "NTLA": "Intellia Therapeutics",
     }
 
+    # industry per ticker, from yfinance .info run locally on 2026-10-04 (.info is blocked on render)
+    TRACKED_INDUSTRIES: dict[str, str | None] = {
+        "MRNA": "Biotechnology",
+        "BNTX": "Biotechnology",
+        "PFE": "Drug Manufacturers - General",
+        "REGN": "Biotechnology",
+        "BIIB": "Drug Manufacturers - General",
+        "GILD": "Drug Manufacturers - General",
+        "AMGN": "Drug Manufacturers - General",
+        "VRTX": "Biotechnology",
+        "ALNY": "Biotechnology",
+        "ARGX": "Biotechnology",
+        "BEAM": "Biotechnology",
+        "CRSP": "Biotechnology",
+        "NTLA": "Biotechnology",
+    }
+
     @property
     def database_url_async(self) -> str:
         # supabase / render hand out "postgresql://"; the async engine needs the asyncpg driver

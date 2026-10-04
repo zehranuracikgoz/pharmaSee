@@ -3,6 +3,7 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 # db and external APIs are set up offline in conftest.py
+from app.config import settings
 from app.main import app
 from app.database import init_db
 from tests.conftest import TEST_ADMIN_TOKEN
@@ -85,6 +86,7 @@ async def _reset_company(ticker: str):
         company = await db.get(Company, ticker)
         company.market_cap = None
         company.sector = None
+        company.industry = None
         await db.commit()
 
 
@@ -117,7 +119,8 @@ async def test_stock_info_falls_back_to_fast_info(client: AsyncClient, monkeypat
     assert resp.status_code== 200
     data = resp.json()
     assert data["market_cap"] == FAST_INFO_MARKET_CAP
-    assert data["sector"] is None  # never filled with a guess
+    # .info blocked: the static mapping answers, nothing is guessed
+    assert data["industry"] == settings.TRACKED_INDUSTRIES["VRTX"]
 
 
 @pytest.mark.asyncio
@@ -139,7 +142,12 @@ async def test_failed_stock_info_is_not_stored(client: AsyncClient, monkeypatch)
     monkeypatch.setattr(yfinance, "Ticker", FakeTicker)
     data  = (await client.get("/stocks/GILD/info")).json()
     assert data["market_cap"] == 50_000_000_000
-    assert data["sector"] == "Healthcare"
+    assert data["industry"] == "Test Industry"  # a live .info value wins over the mapping
+
+
+def test_every_tracked_ticker_has_an_industry():
+    assert set(settings.TRACKED_INDUSTRIES) == set(settings.TRACKED_TICKERS)
+    assert all(settings.TRACKED_INDUSTRIES.values())
 
 
 @pytest.mark.asyncio

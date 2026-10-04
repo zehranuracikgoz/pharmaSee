@@ -47,6 +47,7 @@ def _fake_info(ticker: str) -> dict:
         "shortName": name,
         "longName": f"{name} Inc.",
         "sector": "Healthcare",
+        "industry": "Test Industry",  # differs from TRACKED_INDUSTRIES so tests can tell the source
         "marketCap": 50_000_000_000,
         "regularMarketPrice": 101.25,
         "previousClose": 100.0,

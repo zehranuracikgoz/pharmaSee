@@ -132,7 +132,7 @@ async def sync_companies(db: AsyncSession) -> None:
     for ticker, name in settings.TRACKED_TICKERS.items():
         existing =await db.get(Company, ticker)
         if not existing:
-            # sector stays null until yfinance provides a real one
+            # sector / industry stay null until yfinance provides real ones (the api falls back to config)
             db.add(Company(ticker=ticker, name=name))
     await db.commit()
 

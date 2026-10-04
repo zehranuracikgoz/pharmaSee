@@ -85,9 +85,9 @@ export default function SearchBar({ inputRef }: Props) {
                 {c.ticker}
               </span>
               <span className="text-text text-sm truncate">{c.name}</span>
-              {c.sector && (
+              {c.industry && (
                 <span className="ml-auto text-xs text-muted shrink-0">
-                  {c.sector}
+                  {c.industry}
                 </span>
               )}
             </button>

@@ -31,7 +31,7 @@ function errorDetail(body: string): string | null {
 export interface Company {
   ticker : string;
   name: string;
-  sector?: string;
+  industry?: string;
   market_cap?: number;
   description?: string;
 }

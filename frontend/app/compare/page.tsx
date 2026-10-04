@@ -239,9 +239,9 @@ function CompareInner() {
               <div className = "card-body space-y-3">
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <div className="stat-label">Sector</div>
+                    <div className="stat-label">Industry</div>
                     <div className="text-text mt-0.5">
-                      {company?.sector || "—"}
+                      {company?.industry || "—"}
                     </div>
                   </div>
                   <div>

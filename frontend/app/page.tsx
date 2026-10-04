@@ -36,9 +36,9 @@ function csvCell(value: string | number | undefined | null): string {
 
 function downloadCompaniesCsv(rows: CompanyRow[]) {
   const lines = [
-    "ticker,name,sector,market_cap,change_1d_pct",
+    "ticker,name,industry,market_cap,change_1d_pct",
     ...rows.map((c) =>
-      [c.ticker, c.name, c.sector, c.market_cap, c.changePct?.toFixed(2)].map(csvCell).join(",")
+      [c.ticker, c.name, c.industry, c.market_cap, c.changePct?.toFixed(2)].map(csvCell).join(",")
     ),
   ];
   // bom so excel opens the file as UTF-8
@@ -80,7 +80,7 @@ export default function DashboardPage() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // /companies only returns ticker + name; market cap and sector are filled in per row
+  // /companies only returns ticker + name; market cap and industry are filled in per row
   const enrich = (tickers: string[]) => {
     tickers.forEach((ticker) => {
       api
@@ -218,7 +218,7 @@ export default function DashboardPage() {
                     Company
                   </th>
                   <th className="text-left px-4 py-3 text-muted font-medium hidden md:table-cell">
-                    Sector
+                    Industry
                   </th>
                   <th className="text-right px-4 py-3 text-muted font-medium">
                     Market Cap
@@ -276,7 +276,7 @@ export default function DashboardPage() {
                         {c.loading ? (
                           <div className="h-4 bg-border rounded w-24 animate-pulse" />
                         ) : (
-                          c.sector || "—"
+                          c.industry || "—"
                         )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-text">

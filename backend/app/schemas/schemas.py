@@ -1,12 +1,24 @@
 from datetime import date, datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+from app.config import settings
+
+
+class WithIndustry(BaseModel):
+    ticker: str
+    industry: str | None = None
+
+    @model_validator(mode="after")
+    def fill_industry(self):
+        # a live yfinance value wins; the static mapping covers .info being blocked
+        if not self.industry:
+            self.industry = settings.TRACKED_INDUSTRIES.get(self.ticker)
+        return self
 
 
 # company
-class CompanyBase(BaseModel):
-    ticker: str
+class CompanyBase(WithIndustry):
     name: str
-    sector: str | None = None
     market_cap: float | None = None
     description: str | None = None
 
@@ -130,10 +142,8 @@ class CatalystOut(BaseModel):
 
 
 # search
-class SearchResultItem(BaseModel):
-    ticker: str
+class SearchResultItem(WithIndustry):
     name: str
-    sector: str | None = None
     latest_close: float | None = None
 
 class SearchOut(BaseModel):

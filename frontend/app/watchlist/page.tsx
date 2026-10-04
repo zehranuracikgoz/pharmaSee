@@ -109,7 +109,7 @@ export default function WatchlistPage() {
                 <tr className="border-b border-border/60">
                   <th className="text-left px-5 py-3 text-muted font-medium">Ticker</th>
                   <th className="text-left px-5 py-3 text-muted font-medium">Company</th>
-                  <th className="text-left px-5 py-3 text-muted font-medium hidden md:table-cell">Sector</th>
+                  <th className="text-left px-5 py-3 text-muted font-medium hidden md:table-cell">Industry</th>
                   <th className="text-right px-5 py-3 text-muted font-medium">Price</th>
                   <th className="text-right px-5 py-3 text-muted font-medium">1D</th>
                   <th className="px-5 py-3" />
@@ -140,7 +140,7 @@ export default function WatchlistPage() {
                       {item.loading ? (
                         <div className ="h-4 bg-border rounded w-24 animate-pulse" />
                       ) : (
-                        item.company?.sector || "—"
+                        item.company?.industry || "—"
                       )}
                     </td>
                     <td className="px-5 py-4 text-right font-mono text-text">

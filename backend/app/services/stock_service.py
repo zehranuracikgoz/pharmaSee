@@ -204,16 +204,19 @@ async def get_company_info(ticker: str, db: AsyncSession) -> Company | None:
     if info_ok:
         name = info.get("longName") or info.get("shortName")
         sector = info.get("sector")  # null if missing, never a guess
+        industry = info.get("industry")
         description= info.get("longBusinessSummary")
     else:
-        # fast_info has no name/sector/description: keep what we already have
+        # fast_info has no name/sector/industry/description: keep what we already have
         name = company.name if company else ticker
         sector = company.sector if company else None
+        industry = company.industry if company else None
         description = company.description if company else None
 
     if company:
         company.name = name
         company.sector = sector
+        company.industry = industry
         company.market_cap = market_cap
         company.description = description
     else:
@@ -221,6 +224,7 @@ async def get_company_info(ticker: str, db: AsyncSession) -> Company | None:
             ticker=ticker,
             name=name,
             sector=sector,
+            industry=industry,
             market_cap=market_cap,
             description=description,
         )
