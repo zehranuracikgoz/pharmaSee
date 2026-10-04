@@ -1,0 +1,4 @@
+-r requirements.txt
+# analysis scripts (analysis/) and their tests only; the production image installs requirements.txt
+scipy==1.17.1
+matplotlib==3.10.8
