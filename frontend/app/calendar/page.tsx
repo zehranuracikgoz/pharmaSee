@@ -74,6 +74,12 @@ function groupByPeriod(items: Catalyst[]) {
   return Array.from(groups.values()).sort((a, b) => a.end - b.end || a.span - b.span);
 }
 
+// display only; names that start with mixed case like "mRNA-1283" stay as written
+function capitalize(text: string) {
+  const firstWord = text.split(/\s/)[0];
+  return firstWord === firstWord.toLowerCase() ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
 function CatalystCard({ c }: { c: Catalyst }) {
   const meta =EVENT_META[c.event_type] ?? EVENT_META.other;
   return (
@@ -89,8 +95,8 @@ function CatalystCard({ c }: { c: Catalyst }) {
       </div>
 
       <div>
-        <div className="text-text font-medium">{c.drug ?? "Unnamed program"}</div>
-        {c.indication && <div className="text-xs text-muted mt-0.5">{c.indication}</div>}
+        <div className="text-text font-medium">{c.drug ? capitalize(c.drug) : "Unnamed program"}</div>
+        {c.indication && <div className="text-xs text-muted mt-0.5">{capitalize(c.indication)}</div>}
       </div>
 
       <p className="text-sm text-text/90 leading-snug">{c.summary}</p>
@@ -251,9 +257,12 @@ function CatalystsInner() {
               />
             ) : (
               groups.map((g) => (
-                <div key={g.label} className="space-y-3">
-                  <h3 className="text-sm font-semibold text-text border-b border-border pb-2">{g.label}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                // timeline row: period label on the left, cards on the right
+                <div key={g.label} className="grid grid-cols-1 md:grid-cols-[7rem_minmax(0,1fr)] gap-3 md:gap-6">
+                  <h3 className="text-sm font-semibold text-text border-b border-border pb-2 md:border-b-0 md:pb-0 md:pt-4 md:text-right">
+                    {g.label}
+                  </h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 md:border-l md:border-border md:pl-6">
                     {g.items.map((c) => <CatalystCard key={c.id} c={c} />)}
                   </div>
                 </div>

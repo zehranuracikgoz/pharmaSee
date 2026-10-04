@@ -45,7 +45,7 @@ async def test_fda_sync(client: AsyncClient):
     assert resp.json()["status"] == "ok"
 
 
-ADMIN_ENDPOINTS = ["/fda/sync", "/sec/sync", "/sec/extract"]
+ADMIN_ENDPOINTS = ["/fda/sync", "/sec/sync", "/sec/extract", "/sec/reextract"]
 
 
 @pytest.mark.asyncio
@@ -537,6 +537,67 @@ async def test_undated_approval_gets_filing_date(client: AsyncClient):
 
     await process_pending_filings()
     [row]= await _stored_catalysts()
+    assert (str(row.event_date), row.date_precision, row.date_text) == (
+        "2026-09-01", "day", "Announced September 1, 2026"
+    )
+
+
+@pytest.mark.asyncio
+async def test_forward_looking_approval_is_reclassified(client: AsyncClient):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE
+
+    quote = "Intellia is advancing lonvoguran ziclumeran toward a planned U.S. approval."
+    await _reset_filings(("acc-planned", quote))
+    GEMINI_QUEUE.append([{
+        "event_type": "approval", "drug": "lonvoguran ziclumeran", "indication": "HAE", "date_text": None,
+        "event_date": None, "date_precision": "none", "summary": "Planned U.S. approval.",
+        "source_quote": quote,
+    }])
+
+    await process_pending_filings()
+    [row] = await _stored_catalysts()
+    # no filing date fallback: it is not an announced decision
+    assert (row.event_type, row.event_date, row.date_text) == ("other", None, None)
+
+
+@pytest.mark.asyncio
+async def test_pdufa_target_date_is_stored(client: AsyncClient):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE
+
+    quote = ("The FDA accepted the BLA for NTLA-2001 with Priority Review and assigned "
+             "a PDUFA target action date of March 15, 2027.")
+    await _reset_filings(("acc-bla", quote))
+    base = {"drug": "NTLA-2001", "indication": "ATTR-CM", "source_quote": quote}
+    GEMINI_QUEUE.append([
+        {**base, "event_type": "regulatory_submission", "date_text": None, "event_date": None,
+         "date_precision": "none", "summary": "FDA accepted the BLA."},
+        {**base, "event_type": "pdufa", "date_text": "March 15, 2027", "event_date": "2027-03-15",
+         "date_precision": "day", "summary": "PDUFA target action date."},
+    ])
+
+    await process_pending_filings()
+    rows = {r.event_type: r for r in await _stored_catalysts()}
+    assert set(rows) == {"regulatory_submission", "pdufa"}
+    assert (str(rows["pdufa"].event_date), rows["pdufa"].date_precision) == ("2027-03-15", "day")
+
+
+@pytest.mark.asyncio
+async def test_relative_date_text_uses_filing_date(client: AsyncClient):
+    from app.services.catalyst_service import process_pending_filings
+    from tests.conftest import GEMINI_QUEUE
+
+    quote = "Moderna today reported positive topline Phase 3 results for mRNA-1010."
+    await _reset_filings(("acc-today", quote))
+    GEMINI_QUEUE.append([{
+        "event_type": "topline_readout", "drug": "mRNA-1010", "indication": "flu", "date_text": "Today",
+        "event_date": "2026-08-30", "date_precision": "day", "summary": "Positive topline results.",
+        "source_quote": quote,
+    }])
+
+    await process_pending_filings()
+    [row] = await _stored_catalysts()
     assert (str(row.event_date), row.date_precision, row.date_text) == (
         "2026-09-01", "day", "Announced September 1, 2026"
     )

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models.models import SecFiling
+from app.models.models import Catalyst, SecFiling
 from app.security import require_admin
 from app.services.catalyst_service import is_running, process_pending_filings
 from app.services.sec_service import sync_sec_filings
@@ -45,3 +45,26 @@ async def extract(background: BackgroundTasks, db: AsyncSession = Depends(get_db
     )
     background.add_task(process_pending_filings)    #opens its own db session
     return {"status": "started", "pending_filings": pending}
+
+
+@router.post(
+    "/reextract",
+    status_code=202,
+    summary="Re-extract catalysts from all stored filings",
+    dependencies=[Depends(require_admin)],
+)
+async def reextract(background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """
+    Delete all catalysts, mark every stored filing as unprocessed and start a normal
+    extraction run in the background. Same rate limits as /sec/extract: one run handles
+    at most 40 filings, so call /sec/extract again for the rest.
+    """
+    if not settings.GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not set")
+    if is_running():
+        raise HTTPException(status_code=409, detail="extraction is already running")
+    deleted = (await db.execute(delete(Catalyst))).rowcount
+    pending = (await db.execute(update(SecFiling).values(processed=False))).rowcount
+    await db.commit()
+    background.add_task(process_pending_filings)
+    return {"status": "started", "catalysts_deleted": deleted, "pending_filings": pending}
