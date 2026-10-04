@@ -181,7 +181,7 @@ def abnormal_returns(stock: pd.Series, market: pd.Series, day0: pd.Timestamp) ->
     win = rets.iloc[p0 - WINDOW: p0 + WINDOW + 1]
     r, m = win.iloc[:, 0].to_numpy(), win.iloc[:, 1].to_numpy()
     return {"alpha": float(alpha), "beta": float(beta), "est_days": len(est),
-            "ar_mm": r - (alpha + beta * m), "ar_ma": r - m}
+            "ar_mm": r - (alpha + beta * m), "ar_ma": r - m, "ret": r, "mkt": m}
 
 
 def _window_stat(values: np.ndarray) -> dict:
@@ -393,7 +393,8 @@ def run(approvals: dict[str, list[Approval]], source: str, years: int, today: da
             rows.append({"ticker": ticker, "day0": ev.day0.date().isoformat(), "kind": ev.kind,
                          "approvals": ev.approvals, "size": "large_cap" if ticker in LARGE_CAPS else "small_cap",
                          **{k: res[k] for k in ("alpha", "beta", "est_days")},
-                         "ar_mm": res["ar_mm"].tolist(), "ar_ma": res["ar_ma"].tolist()})
+                         "ar_mm": res["ar_mm"].tolist(), "ar_ma": res["ar_ma"].tolist(),
+                         "ret": res["ret"].tolist(), "mkt": res["mkt"].tolist()})
     logger.info("events kept: %d, dropped for another event within %d trading days: %d, skipped: %s",
                 len(rows), CLUSTER_DAYS, dropped_cluster, skipped)
 
@@ -427,20 +428,32 @@ def run(approvals: dict[str, list[Approval]], source: str, years: int, today: da
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--source", choices=["auto", "db", "openfda"], default="auto",
-                        help="approvals from the database, OpenFDA, or the database if it has every ticker")
-    parser.add_argument("--years", type=int, default=5)
-    args = parser.parse_args()
+def compute(source: str = "auto", years: int = 5) -> dict:
+    """events and abnormal returns for the last `years` of approvals; shared by the scripts in analysis/"""
+    since = date.today() - timedelta(days=365 * years)
+    approvals, used = asyncio.run(load_approvals(source, since))
+    logger.info("approvals since %s from %s: %d", since, used, sum(len(v) for v in approvals.values()))
+    return run(approvals, used, years)
+
+
+def setup_logging():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     for noisy in ("httpx", "yfinance", "peewee"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    since = date.today() - timedelta(days=365 * args.years)
-    approvals, source = asyncio.run(load_approvals(args.source, since))
-    logger.info("approvals since %s from %s: %d", since, source, sum(len(v) for v in approvals.values()))
-    results = run(approvals, source, args.years)
+
+def add_source_args(parser: argparse.ArgumentParser):
+    parser.add_argument("--source", choices=["auto", "db", "openfda"], default="auto",
+                        help="approvals from the database, OpenFDA, or the database if it has every ticker")
+    parser.add_argument("--years", type=int, default=5)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_source_args(parser)
+    args = parser.parse_args()
+    setup_logging()
+    results = compute(args.source, args.years)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     (RESULTS_DIR / "event_study.json").write_text(json.dumps(results, indent=2), encoding="utf-8")

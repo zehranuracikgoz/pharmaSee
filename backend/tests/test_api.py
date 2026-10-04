@@ -714,6 +714,41 @@ async def test_invalid_json_from_one_model_still_saves_filing(client: AsyncClien
     assert await _filing_states() == {"acc-vote": True}
 
 
+def test_sell_the_news_strategy_returns_from_known_prices():
+    from datetime import date
+
+    import numpy as np
+    import pandas as pd
+
+    from analysis.event_study import abnormal_returns, closes
+    from analysis.sell_the_news import COST, trade_returns
+
+    #market = the mocked yfinance series; the stock follows it with a known alpha / beta plus shocks
+    market = closes("MRNA", date(2025, 1, 1), date(2026, 6, 1))
+    alpha, beta, day0 = 0.001, 1.5, 300
+    shocks = {day0 - 5: 0.04, day0 + 1: 0.03, day0 + 4: 0.01}  # one in each of A's, B's and C's days
+    r_s = alpha + beta * market.pct_change().fillna(0).to_numpy()
+    for day, shock in shocks.items():
+        r_s[day] += shock
+    stock = pd.Series(100 * np.cumprod(1 + r_s), index=market.index)
+
+    res = abnormal_returns(stock, market, market.index[day0])
+    trades = trade_returns(res["ret"], res["mkt"], res["ar_mm"])
+
+    p, m = stock.to_numpy(), market.to_numpy()
+    expected = {  # buy / sell closes read straight off the prices
+        "A": (p[day0 - 11], p[day0 - 1], m[day0 - 11], m[day0 - 1], 0.04),
+        "B": (p[day0 - 11], p[day0 + 10], m[day0 - 11], m[day0 + 10], 0.04 + 0.03 + 0.01),
+        "C": (p[day0 + 1], p[day0 + 10], m[day0 + 1], m[day0 + 10], 0.01),
+    }
+    for key, (buy, sell, mbuy, msell, abnormal) in expected.items():
+        assert trades[key]["raw"]== pytest.approx(sell / buy - 1, abs=1e-9)
+        assert trades[key]["xbi"] == pytest.approx(msell / mbuy - 1, abs=1e-9)
+        assert trades[key]["abnormal"] == pytest.approx(abnormal, abs=1e-9)
+        assert trades[key]["abnormal_net"] == pytest.approx(abnormal - COST, abs=1e-9)
+        assert trades[key]["raw_net"] == pytest.approx(sell / buy -1 - COST, abs=1e-9)
+
+
 @pytest.mark.asyncio
 async def test_openfda_fetch_pages_through_all_results(monkeypatch):
     from app.services import fda_service

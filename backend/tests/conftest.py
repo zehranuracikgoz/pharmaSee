@@ -264,8 +264,8 @@ def _fake_gemini(url: str, body: dict) -> httpx.Response:
     return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": text}]}}]}, request=request)
 
 
-# ── second voter: a fake openai-compatible provider that voting tests add to PROVIDERS.
-# same queue format as gemini, plus a str for a raw (e.g. invalid json) reply
+# ── second voter: fake openai-compatible provider that voting tests add to PROVIDERS
+# same queue format as gemini, plus a str for a raw reply (e.g. invalid json)
 
 SECOND_LLM_HOST = "second-llm.test"
 SECOND_QUEUE: list = []
